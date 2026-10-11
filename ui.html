@@ -156,6 +156,17 @@
   .verdict.good { color: var(--up); } .verdict.bad { color: var(--bad); }
   .stats { font-size: 13px; color: var(--muted); margin-top: 6px; }
 
+  /* folding a card down to one line per message */
+  .stagebar { display: flex; justify-content: flex-end; gap: 6px; margin-bottom: 10px; }
+  .node .head.fold { cursor: pointer; }
+  .fold-btn { background: none; color: var(--muted); padding: 0 4px; font-size: 14px; font-weight: 400;
+              line-height: 1; transition: transform .15s; }
+  .fold-btn:hover { color: var(--ink); }
+  .node.collapsed .fold-btn { transform: rotate(-90deg); }
+  .node.collapsed .msg { padding: 5px 12px; margin-top: 6px; }
+  .node.collapsed .msg .txt { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 14px; }
+  .node.collapsed .note { display: none; }
+
   .wire { position: relative; height: 32px; margin-left: 32px; width: 2px; background: var(--line); }
   .wire i { position: absolute; left: -4px; width: 10px; height: 10px; border-radius: 50%; opacity: 0; top: 0; }
   .wire.down i { background: var(--accent); opacity: 1; animation: down .9s linear infinite; }
@@ -387,6 +398,11 @@ function drag(e, row, from) {
 let nodes = [], wires = [], you, planted = null;
 function renderStage(task, rule, runChain, runMode, sabLayer) {
   const stage = $("#stage"); stage.replaceChildren(); nodes = []; wires = []; planted = null;
+  const bar = el("div", "stagebar");
+  const all = (fold, text) => { const b = el("button", "ghost", text); b.type = "button";
+    b.onclick = () => nodes.forEach(n => setFolded(n, fold)); return b; };
+  bar.append(all(true, "Collapse all"), all(false, "Expand all"));
+  stage.append(bar);
   you = el("div", "node you");
   const h = el("div", "head"); h.append(el("span", "model", "You"), el("span", "status", ""));
   you.append(h);
@@ -408,10 +424,20 @@ function renderStage(task, rule, runChain, runMode, sabLayer) {
     head.append(el("span", "layer", `Layer ${i + 1}`), el("span", "model", name), el("span", "role", role));
     if (sabLayer === i) { n.classList.add("sab"); head.append(el("span", "tag sab", "saboteur")); }
     n.status = el("span", "status", "waiting"); head.append(n.status);
+    n.fold = el("button", "fold-btn", "▾"); n.fold.type = "button";
+    n.fold.setAttribute("aria-label", `Collapse layer ${i + 1}`); n.fold.setAttribute("aria-expanded", "true");
+    head.append(n.fold); head.classList.add("fold");
+    head.onclick = () => setFolded(n, !n.classList.contains("collapsed"));
     n.down = el("div", "msg down"); n.up = el("div", "msg up");
     n.append(head, n.down, n.up);
     nodes.push(n); stage.append(n);
   });
+}
+
+function setFolded(n, fold) {
+  n.classList.toggle("collapsed", fold);
+  n.fold.setAttribute("aria-expanded", String(!fold));
+  n.fold.setAttribute("aria-label", (fold ? "Expand" : "Collapse") + n.fold.getAttribute("aria-label").replace(/^\w+/, ""));
 }
 
 function lbl(text, meta) {
