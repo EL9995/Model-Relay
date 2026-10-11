@@ -6,6 +6,7 @@ Run:   python3 server.py        then open http://localhost:8765
 """
 
 import json
+import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -14,6 +15,7 @@ import relay
 
 PORT = 8765
 PAGE = Path(__file__).with_name("ui.html")
+RAM_GB = round(os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / 2**30)  # GiB, as Apple advertises it
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -26,7 +28,7 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 models = [{"name": m["name"], "gb": round(m["size"] / 1e9, 1)}
                           for m in relay.post_get("/api/tags").get("models", [])]
-                body = {"models": models, "default": relay.DEFAULT_CHAIN.split(",")}
+                body = {"models": models, "default": relay.DEFAULT_CHAIN.split(","), "ram_gb": RAM_GB}
             except OSError as e:
                 body = {"error": f"Can't reach Ollama at {relay.OLLAMA}. Is the app running? ({e})"}
             self.reply(200, "application/json", json.dumps(body).encode())

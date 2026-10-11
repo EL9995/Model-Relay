@@ -21,60 +21,97 @@
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--ink);
          font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-  main { max-width: 760px; margin: 0 auto; padding: 32px 16px 80px; }
-  h1 { font-size: 22px; margin: 0 0 4px; letter-spacing: -0.01em; }
-  .sub { color: var(--muted); margin: 0 0 24px; }
-
-  form { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
-  .ask { display: flex; gap: 8px; }
-  .ask input { flex: 1; min-width: 0; font: inherit; padding: 10px 12px; border-radius: 8px;
-               border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
-  button { font: inherit; font-weight: 600; padding: 10px 18px; border: 0; border-radius: 8px;
+  button { font: inherit; font-weight: 600; padding: 8px 18px; border: 0; border-radius: 8px;
            background: var(--accent); color: #fff; cursor: pointer; }
   button:disabled { opacity: .5; cursor: default; }
   button.ghost { background: none; color: var(--muted); border: 1px solid var(--line);
                  padding: 3px 10px; font-size: 12px; font-weight: 500; }
   button.ghost:hover { color: var(--ink); }
-  select { font: inherit; font-size: 13px; padding: 4px 8px; border-radius: 6px;
+  select { font: inherit; font-size: 13px; padding: 6px 8px; border-radius: 8px;
            border: 1px solid var(--line); background: var(--surface); color: var(--ink); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-  .opts { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 12px; font-size: 13px; }
-  .opts[hidden] { display: none; }
-  .opts > label { color: var(--muted); display: inline-flex; align-items: center; gap: 8px; }
-  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
-  .seg label { padding: 5px 14px; font-weight: 600; cursor: pointer; color: var(--muted); }
-  .seg input { position: absolute; opacity: 0; pointer-events: none; }
-  .seg label:has(input:checked) { background: var(--accent); color: #fff; }
-  .seg label:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: -2px; }
-  .hint { color: var(--muted); flex: 1; min-width: 200px; }
-  .rule { width: 100%; margin-top: 10px; font: inherit; font-size: 14px; padding: 8px 12px; border-radius: 8px;
-          border: 1px dashed var(--line); background: var(--bg); color: var(--ink); }
+  /* ---- header: title + mode tabs ---- */
+  header { border-bottom: 1px solid var(--line); background: var(--surface); }
+  .bar { max-width: 1160px; margin: 0 auto; padding: 14px 16px; display: flex; flex-wrap: wrap;
+         align-items: center; gap: 12px 24px; }
+  h1 { font-size: 18px; margin: 0; letter-spacing: -0.01em; }
+  .tabs { display: inline-flex; gap: 4px; background: var(--bg); border: 1px solid var(--line);
+          border-radius: 10px; padding: 3px; }
+  .tabs button { background: none; color: var(--muted); padding: 5px 16px; font-size: 14px; border-radius: 7px; }
+  .tabs button[aria-selected=true] { background: var(--surface); color: var(--ink);
+          box-shadow: 0 1px 2px rgba(0,0,0,.12); }
 
-  .chainbox { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
-  .chainhead { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
-  .chainhead span { flex: 1; min-width: 180px; }
-  .chain { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
-  .chip { font-family: var(--mono); font-size: 12px; background: var(--bg); border: 1px solid var(--line);
-          border-radius: 999px; padding: 3px 4px 3px 6px; color: var(--ink); display: inline-flex;
-          align-items: center; gap: 4px; cursor: grab; user-select: none; touch-action: none; }
-  .chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-  .chip .grip { color: var(--muted); letter-spacing: -2px; padding-right: 2px; }
-  .chip .num { color: var(--muted); }
-  .chip button { background: none; color: var(--muted); padding: 0 6px; font-weight: 400; }
-  .chip.dragging { opacity: .4; }
-  .chip.over { border-color: var(--accent); box-shadow: -3px 0 0 var(--accent); }
+  /* ---- layout: sidebar + main; one column on narrow screens ---- */
+  .layout { max-width: 1160px; margin: 0 auto; padding: 20px 16px 80px; display: grid; gap: 20px;
+            grid-template-columns: 320px minmax(0, 1fr); grid-template-rows: auto 1fr;
+            grid-template-areas: "side compose" "side stage"; align-items: start; }
+  .side { grid-area: side; display: grid; gap: 12px; position: sticky; top: 16px; }
+  #form { grid-area: compose; }
+  .stagewrap { grid-area: stage; }
+  @media (max-width: 860px) {
+    .layout { grid-template-columns: minmax(0, 1fr); grid-template-areas: "compose" "side" "stage"; }
+    .side { position: static; }
+  }
 
-  .history { margin-top: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
-  .history summary { padding: 10px 16px; cursor: pointer; font-weight: 600; font-size: 14px; }
+  .panel { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
+  .panel[hidden] { display: none; }
+  .phead { display: flex; align-items: center; gap: 6px; }
+  .phead h2 { font-size: 14px; margin: 0; flex: 1; }
+  .phint { font-size: 12px; color: var(--muted); margin: 4px 0 10px; }
+
+  /* ---- chain list ---- */
+  .chainlist { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+  .row { display: grid; grid-template-columns: auto auto 1fr auto auto; align-items: center; gap: 8px;
+         padding: 7px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg);
+         cursor: grab; user-select: none; touch-action: none; }
+  .row .grip { color: var(--muted); letter-spacing: -2px; }
+  .row .n { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; width: 1.2em; text-align: right; }
+  .row .name { font-family: var(--mono); font-size: 13px; font-weight: 600; min-width: 0;
+               overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row .name small { display: block; font-family: inherit; font-weight: 400; font-size: 11px; color: var(--muted); }
+  .row button { background: none; color: var(--muted); font-weight: 500; font-size: 12px; padding: 2px 6px; }
+  .row button:hover { color: var(--ink); }
+  .row .sabbtn { border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; font-size: 11px; }
+  .row .sabbtn[aria-pressed=true] { background: var(--bad); border-color: var(--bad); color: #fff; }
+  .row.sab { border-color: var(--bad); background: var(--bad-soft); }
+  .row.dragging { opacity: .4; }
+  .row.over { box-shadow: 0 -3px 0 var(--accent); }
+  .row.over.below { box-shadow: 0 3px 0 var(--accent); }
+  .row:focus-visible { outline-offset: 1px; }
+  #add { width: 100%; margin-top: 8px; }
+  .mem { font-size: 12px; color: var(--muted); margin: 10px 0 0; }
+  .mem.tight { color: var(--warn); }
+
+  /* ---- composer ---- */
+  .hint { font-size: 13px; color: var(--muted); margin: 0 0 12px; }
+  .field { display: block; margin-bottom: 10px; }
+  .field > span { display: block; font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: 4px; }
+  .field > span em { font-style: normal; font-weight: 400; }
+  textarea { width: 100%; font: inherit; color: var(--ink); resize: none; display: block; overflow-y: auto; }
+  #rule { font-size: 14px; padding: 8px 12px; border-radius: 8px; border: 1px dashed var(--line); background: var(--bg); }
+  .prompt { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); padding: 10px 12px 8px; }
+  .prompt:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  #task { border: 0; background: none; font-size: 16px; line-height: 1.5; padding: 2px 0; }
+  #task:focus-visible { outline: none; }
+  .pfoot { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
+  .pfoot span { flex: 1; font-size: 12px; color: var(--muted); }
+
+  .banner { margin-top: 12px; padding: 10px 14px; border-radius: 8px; background: var(--warn-soft);
+            color: var(--warn); display: none; }
+  .banner.show { display: block; }
+
+  /* ---- saved runs ---- */
+  .history { padding: 0; }
+  .history summary { padding: 12px 14px; cursor: pointer; font-weight: 600; font-size: 14px; }
   .history summary span { color: var(--muted); font-weight: 400; }
-  .history ol { list-style: none; margin: 0; padding: 0 8px 8px; max-height: 320px; overflow-y: auto; }
+  .history ol { list-style: none; margin: 0; padding: 0 6px 6px; max-height: 340px; overflow-y: auto; }
   .history li button { all: unset; box-sizing: border-box; width: 100%; display: grid; cursor: pointer;
-          grid-template-columns: auto 1fr auto; gap: 2px 10px; padding: 8px; border-radius: 8px; font-size: 13px; }
+          grid-template-columns: auto 1fr; gap: 2px 8px; padding: 8px; border-radius: 8px; font-size: 13px; }
   .history li button:hover, .history li button:focus-visible { background: var(--bg); }
   .history li button.current { background: var(--accent-soft); }
-  .history .when { color: var(--muted); font-family: var(--mono); font-size: 12px; }
   .history .q { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .history .a { color: var(--muted); font-size: 12px; grid-column: 2 / 4; overflow: hidden;
+  .history .a { color: var(--muted); font-size: 12px; grid-column: 1 / 3; overflow: hidden;
           text-overflow: ellipsis; white-space: nowrap; }
   .tag { font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 999px;
          background: var(--accent-soft); color: var(--accent); align-self: center; }
@@ -82,11 +119,9 @@
   .tag.cipher { background: var(--warn-soft); color: var(--warn); }
   .tag.sab { background: var(--bad-soft); color: var(--bad); }
   .empty { color: var(--muted); font-size: 13px; padding: 4px 8px 8px; }
-  .banner { margin-top: 16px; padding: 10px 14px; border-radius: 8px; background: var(--warn-soft);
-            color: var(--warn); display: none; }
-  .banner.show { display: block; }
 
-  #stage { margin-top: 28px; }
+  /* ---- stage ---- */
+  .stagewrap:empty { display: none; }
   .node { background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
           padding: 12px 16px; transition: border-color .2s, box-shadow .2s; }
   .node.sab { border-color: var(--bad); }
@@ -114,78 +149,85 @@
   .msg.fixed { background: var(--warn-soft); } .msg.fixed .lbl { color: var(--warn); }
   .msg.bad { background: var(--bad-soft); } .msg.bad .lbl { color: var(--bad); }
   .note { font-size: 13px; color: var(--muted); margin-top: 4px; }
-  .you .txt { font-size: 17px; }
+  .you .txt { font-size: 16px; }
   .final { font-size: 20px; font-weight: 600; }
   .verdict { font-weight: 600; margin-top: 6px; }
   .verdict.good { color: var(--up); } .verdict.bad { color: var(--bad); }
   .stats { font-size: 13px; color: var(--muted); margin-top: 6px; }
 
-  .wire { position: relative; height: 40px; margin-left: 32px; width: 2px; background: var(--line); }
-  .wire i { position: absolute; left: -4px; width: 10px; height: 10px; border-radius: 50%;
-            opacity: 0; top: 0; }
+  .wire { position: relative; height: 32px; margin-left: 32px; width: 2px; background: var(--line); }
+  .wire i { position: absolute; left: -4px; width: 10px; height: 10px; border-radius: 50%; opacity: 0; top: 0; }
   .wire.down i { background: var(--accent); opacity: 1; animation: down .9s linear infinite; }
   .wire.up i { background: var(--up); opacity: 1; animation: up .9s linear infinite; }
-  @keyframes down { from { top: -5px; } to { top: 35px; } }
-  @keyframes up { from { top: 35px; } to { top: -5px; } }
+  @keyframes down { from { top: -5px; } to { top: 27px; } }
+  @keyframes up { from { top: 27px; } to { top: -5px; } }
   @keyframes blink { 50% { opacity: .2; } }
   @keyframes pop { from { opacity: 0; transform: translateY(-4px); } }
   @media (prefers-reduced-motion: reduce) {
     .wire i, .node.active .status::before, .msg.show { animation: none; }
-    .wire.down i, .wire.up i { top: 15px; }
+    .wire.down i, .wire.up i { top: 11px; }
   }
 </style>
 </head>
 <body>
-<main>
-  <h1>Model Relay</h1>
-  <p class="sub">Send one prompt through every model you have installed and watch what each one does with it.</p>
+<header>
+  <div class="bar">
+    <h1>Model Relay</h1>
+    <div class="tabs" role="tablist" aria-label="Mode">
+      <button type="button" role="tab" data-mode="relay">Relay</button>
+      <button type="button" role="tab" data-mode="blind">Blind</button>
+      <button type="button" role="tab" data-mode="cipher">Cipher</button>
+    </div>
+  </div>
+</header>
 
+<div class="layout">
   <form id="form">
-    <div class="ask">
-      <input id="task" autocomplete="off">
-      <button id="go">Run</button>
-    </div>
-    <div class="opts">
-      <div class="seg" role="radiogroup" aria-label="Mode">
-        <label><input type="radio" name="mode" value="relay" checked>Relay</label>
-        <label><input type="radio" name="mode" value="blind">Blind</label>
-        <label><input type="radio" name="mode" value="cipher">Cipher</label>
+    <p class="hint" id="hint"></p>
+    <label class="field"><span>Rule for every model <em>· optional</em></span>
+      <textarea id="rule" rows="1" placeholder="e.g. Answer in one sentence."></textarea>
+    </label>
+    <div class="prompt">
+      <textarea id="task" rows="2" aria-label="Prompt"></textarea>
+      <div class="pfoot">
+        <span>Enter to run · Shift+Enter for a new line</span>
+        <button id="go">Run</button>
       </div>
-      <span class="hint" id="hint"></span>
     </div>
-    <div class="opts" id="relayOpts">
-      <label>Chaos <select id="saboteur"></select></label>
-    </div>
-    <div class="opts" id="cipherOpts" hidden>
-      <label>Cipher
-        <select id="cipher">
-          <option value="base64">base64</option>
-          <option value="rot13">ROT13</option>
-          <option value="caesar">Caesar +3</option>
-          <option value="reverse">Reverse</option>
-          <option value="mix">Mix: a different cipher each hop</option>
-        </select>
-      </label>
-    </div>
-    <input id="rule" class="rule" autocomplete="off"
-           placeholder="Rule every model must follow (optional), e.g. Answer in one sentence.">
-    <div class="chainbox">
-      <div class="chainhead">
-        <span>Chain, top to bottom. Drag to reorder (or focus one and use the arrow keys).</span>
+    <div class="banner" id="banner"></div>
+  </form>
+
+  <aside class="side">
+    <section class="panel">
+      <div class="phead">
+        <h2>Chain</h2>
         <button type="button" class="ghost" id="sortBig">Biggest first</button>
         <button type="button" class="ghost" id="flip">Flip</button>
       </div>
-      <div class="chain" id="chain"></div>
-    </div>
-  </form>
-  <details class="history" id="history">
-    <summary>Saved runs <span id="hcount"></span></summary>
-    <ol id="hlist"></ol>
-  </details>
-  <div class="banner" id="banner"></div>
+      <p class="phint" id="chainHint"></p>
+      <ol class="chainlist" id="chain"></ol>
+      <select id="add" aria-label="Add a model"></select>
+      <p class="mem" id="mem"></p>
+    </section>
+    <section class="panel" id="cipherPanel" hidden>
+      <div class="phead"><h2>Cipher</h2></div>
+      <p class="phint">How the message is encoded at each step down.</p>
+      <select id="cipher" style="width:100%">
+        <option value="base64">base64</option>
+        <option value="rot13">ROT13</option>
+        <option value="caesar">Caesar +3</option>
+        <option value="reverse">Reverse</option>
+        <option value="mix">Mix: a different cipher each step</option>
+      </select>
+    </section>
+    <details class="panel history">
+      <summary>Saved runs <span id="hcount"></span></summary>
+      <ol id="hlist"></ol>
+    </details>
+  </aside>
 
-  <div id="stage"></div>
-</main>
+  <div class="stagewrap" id="stage"></div>
+</div>
 
 <script>
 const $ = s => document.querySelector(s);
@@ -195,114 +237,136 @@ const el = (tag, cls, text) => {
   if (text != null) e.textContent = text;
   return e;
 };
-let installed = [], chain = [], running = false, openId = null;
+let installed = [], chain = [], ramGb = 0, running = false, openId = null;
+let current = "relay", saboteur = null;  // saboteur is a model name, so it follows the model when you reorder
 const gb = name => (installed.find(m => m.name === name) || {}).gb || 0;
 const CNAME = { base64: "base64", rot13: "ROT13", caesar: "Caesar +3", reverse: "reverse", mix: "mix" };
 
 function warn(text) { $("#banner").textContent = text; $("#banner").classList.toggle("show", !!text); }
 
+// ---- text boxes grow with what you type ----
+function grow(t, max) { t.style.height = "auto"; t.style.height = Math.min(t.scrollHeight + 2, max) + "px"; }
+$("#task").oninput = () => grow($("#task"), 260);
+$("#rule").oninput = () => grow($("#rule"), 120);
+$("#task").onkeydown = e => {
+  if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); $("#form").requestSubmit(); }
+};
+$("#rule").onkeydown = e => {
+  if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); $("#task").focus(); }
+};
+
 // ---- modes ----
 const MODES = {
-  relay: { hint: "Each model rewrites the task for the one below. The bottom one answers; each layer checks it on the way back up.",
-           placeholder: "Ask something… e.g. What is the capital of Japan?" },
+  relay: { hint: "Each model rewrites the task for the one below. The bottom one answers, and each layer checks it on the way back up.",
+           placeholder: "Ask something… e.g. What is 7 times 8?",
+           chain: "Top to bottom. Drag to reorder. Turn on Saboteur for a model to have it plant a wrong answer." },
   blind: { hint: "Every model gets your prompt word for word and answers on its own. None sees another's answer.",
-           placeholder: "Ask something… e.g. How many r's are in strawberry?" },
-  cipher: { hint: "Your message is encoded and passed down. Each model decodes it and re-encodes it for the next. Every step is checked.",
-            placeholder: "A secret message… e.g. meet at noon" },
+           placeholder: "Ask something… e.g. How many r's are in strawberry?",
+           chain: "The models answer one at a time, in this order. Drag to reorder." },
+  cipher: { hint: "Your message is encoded and passed down. Each model decodes it and re-encodes it for the next, and the tool checks every step.",
+            placeholder: "A secret message… e.g. meet at noon",
+            chain: "Top to bottom. Drag to reorder." },
 };
-const mode = () => document.querySelector("input[name=mode]:checked").value;
 function setMode(m) {
-  document.querySelector(`input[name=mode][value=${m}]`).checked = true;
+  current = m;
+  document.querySelectorAll(".tabs button").forEach(b => b.setAttribute("aria-selected", b.dataset.mode === m));
   $("#hint").textContent = MODES[m].hint;
   $("#task").placeholder = MODES[m].placeholder;
-  $("#relayOpts").hidden = m !== "relay";
-  $("#cipherOpts").hidden = m !== "cipher";
+  $("#cipherPanel").hidden = m !== "cipher";
+  renderChain();
 }
-document.querySelectorAll("input[name=mode]").forEach(r => r.onchange = () => setMode(mode()));
-setMode("relay");
+document.querySelectorAll(".tabs button").forEach(b => b.onclick = () => setMode(b.dataset.mode));
 
-// ---- chain: any order, drag to rearrange (pointer events, so mouse and touch both work) ----
+// ---- chain: a vertical list in any order; drag with pointer events so mouse and touch both work ----
 function move(from, to) {
   if (to < 0 || to >= chain.length || from === to) return false;
   const [m] = chain.splice(from, 1); chain.splice(to, 0, m);
   renderChain();
   return true;
 }
+function remove(i) {
+  if (chain.length < 2) return;
+  if (chain[i] === saboteur) saboteur = null;
+  chain.splice(i, 1); renderChain();
+}
 function renderChain() {
-  const box = $("#chain"); box.replaceChildren();
+  $("#chainHint").textContent = MODES[current].chain;
+  const list = $("#chain"); list.replaceChildren();
   chain.forEach((name, i) => {
-    const chip = el("span", "chip");
-    chip.tabIndex = 0; chip.dataset.i = i;
-    chip.setAttribute("aria-label", `Layer ${i + 1}: ${name}. Arrow keys move it, Delete removes it.`);
-    chip.append(el("span", "grip", "⋮⋮"), el("span", "num", `${i + 1}`), el("span", null, `${name} · ${gb(name)} GB`));
-    if (chain.length > 1) {
-      const x = el("button", null, "×"); x.type = "button"; x.title = "Remove"; x.tabIndex = -1;
-      x.onclick = () => { chain.splice(i, 1); renderChain(); };
-      chip.append(x);
-    }
-    chip.onpointerdown = e => drag(e, chip, i);
-    chip.onkeydown = e => {
-      const d = { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 }[e.key];
+    const row = el("li", "row" + (current === "relay" && name === saboteur ? " sab" : ""));
+    row.tabIndex = 0; row.dataset.i = i;
+    row.setAttribute("aria-label", `Layer ${i + 1}: ${name}. Arrow keys move it, Delete removes it.`);
+    const label = el("span", "name", name); label.append(el("small", null, `${gb(name)} GB`));
+    row.append(el("span", "grip", "⋮⋮"), el("span", "n", `${i + 1}`), label);
+    if (current === "relay") {
+      const s = el("button", "sabbtn", "Saboteur"); s.type = "button";
+      s.setAttribute("aria-pressed", name === saboteur);
+      s.title = "Make this model secretly plant a wrong answer";
+      s.onclick = () => { saboteur = saboteur === name ? null : name; renderChain(); };
+      row.append(s);
+    } else row.append(el("span"));
+    const x = el("button", null, "✕"); x.type = "button"; x.title = "Remove"; x.disabled = chain.length < 2;
+    x.onclick = () => remove(i);
+    row.append(x);
+    row.onpointerdown = e => drag(e, row, i);
+    row.onkeydown = e => {
+      if (e.target !== row) return;
+      const d = { ArrowUp: -1, ArrowLeft: -1, ArrowDown: 1, ArrowRight: 1 }[e.key];
       if (d) { e.preventDefault(); if (move(i, i + d)) $("#chain").children[i + d].focus(); }
-      if ((e.key === "Delete" || e.key === "Backspace") && chain.length > 1) { chain.splice(i, 1); renderChain(); }
+      if (e.key === "Delete" || e.key === "Backspace") remove(i);
     };
-    box.append(chip);
+    list.append(row);
   });
-  const rest = installed.filter(m => !chain.includes(m.name));
-  if (rest.length) {
-    const sel = el("select"); sel.append(el("option", null, "+ add model"));
-    rest.forEach(m => { const o = el("option", null, `${m.name} · ${m.gb} GB`); o.value = m.name; sel.append(o); });
-    sel.onchange = () => { chain.push(sel.value); renderChain(); };
-    box.append(sel);
-  }
-  renderSaboteur();
+
+  const add = $("#add"), rest = installed.filter(m => !chain.includes(m.name));
+  const first = el("option", null, rest.length ? "+ Add a model" : "All installed models are in the chain");
+  first.value = ""; add.replaceChildren(first);
+  rest.forEach(m => { const o = el("option", null, `${m.name} · ${m.gb} GB`); o.value = m.name; add.append(o); });
+  add.disabled = !rest.length;
+
+  const total = chain.reduce((t, n) => t + gb(n), 0), tight = ramGb && total > ramGb * 0.6;
+  $("#mem").textContent = `${chain.length} models · ${total.toFixed(1)} GB` + (ramGb ? ` · your Mac has ${ramGb} GB` : "") +
+    (tight ? ". Not all of them fit in memory at once, so they'll take turns loading, which is slower." : "");
+  $("#mem").classList.toggle("tight", !!tight);
 }
-function drag(e, chip, from) {
-  if (e.button !== 0 || e.target.closest("button")) return;
-  const x0 = e.clientX, y0 = e.clientY;
-  let target = null, moved = false;
-  chip.setPointerCapture(e.pointerId);
-  const over = ev => {
-    if (!moved && Math.hypot(ev.clientX - x0, ev.clientY - y0) < 4) return;  // still a click
-    moved = true; chip.classList.add("dragging");
-    const hit = document.elementFromPoint(ev.clientX, ev.clientY)?.closest(".chip");
-    document.querySelectorAll(".chip.over").forEach(c => c.classList.remove("over"));
-    target = hit && hit !== chip ? Number(hit.dataset.i) : null;
-    if (target != null) hit.classList.add("over");
-  };
-  const up = () => {
-    chip.removeEventListener("pointermove", over);
-    chip.classList.remove("dragging");
-    document.querySelectorAll(".chip.over").forEach(c => c.classList.remove("over"));
-    if (target != null) move(from, target);
-  };
-  chip.addEventListener("pointermove", over);
-  chip.addEventListener("pointerup", up, { once: true });
-  chip.addEventListener("pointercancel", up, { once: true });
-}
+$("#add").onchange = e => { if (e.target.value) { chain.push(e.target.value); renderChain(); } };
 $("#sortBig").onclick = () => { chain.sort((a, b) => gb(b) - gb(a)); renderChain(); };
 $("#flip").onclick = () => { chain.reverse(); renderChain(); };
 
-function renderSaboteur(pick) {
-  const sel = $("#saboteur"), keep = pick !== undefined ? String(pick) : sel.value;
-  const none = el("option", null, "None"); none.value = "";
-  sel.replaceChildren(none);
-  chain.forEach((name, i) => {
-    const o = el("option", null, `Saboteur at layer ${i + 1} · ${name}`); o.value = String(i); sel.append(o);
-  });
-  sel.value = keep !== "" && Number(keep) < chain.length ? keep : "";
+function drag(e, row, from) {
+  if (e.button !== 0 || e.target.closest("button")) return;
+  const x0 = e.clientX, y0 = e.clientY;
+  let target = null, moved = false;
+  row.setPointerCapture(e.pointerId);
+  const clear = () => document.querySelectorAll(".row.over").forEach(r => r.classList.remove("over", "below"));
+  const over = ev => {
+    if (!moved && Math.hypot(ev.clientX - x0, ev.clientY - y0) < 4) return;  // still a click
+    moved = true; row.classList.add("dragging"); clear();
+    const hit = document.elementFromPoint(ev.clientX, ev.clientY)?.closest(".row");
+    target = hit && hit !== row ? Number(hit.dataset.i) : null;
+    if (target != null) hit.classList.add("over", ...(target > from ? ["below"] : []));
+  };
+  const up = () => {
+    row.removeEventListener("pointermove", over);
+    row.classList.remove("dragging"); clear();
+    if (target != null) move(from, target);
+  };
+  row.addEventListener("pointermove", over);
+  row.addEventListener("pointerup", up, { once: true });
+  row.addEventListener("pointercancel", up, { once: true });
 }
 
 // ---- the stage: You at the top, one card per model, a wire above each card ----
 let nodes = [], wires = [], you, planted = null;
-function renderStage(task, rule, runChain, runMode, saboteur) {
+function renderStage(task, rule, runChain, runMode, sabLayer) {
   const stage = $("#stage"); stage.replaceChildren(); nodes = []; wires = []; planted = null;
   you = el("div", "node you");
   const h = el("div", "head"); h.append(el("span", "model", "You"), el("span", "status", ""));
-  const m = el("div", "msg down show");
-  m.append(lbl(runMode === "cipher" ? "Secret message" : "Task"), el("div", "txt", task));
-  you.append(h, m);
+  you.append(h);
   if (rule) { const r = el("div", "msg down show"); r.append(lbl("Rule for every model"), el("div", "txt", rule)); you.append(r); }
+  const m = el("div", "msg down show");
+  m.append(lbl(runMode === "cipher" ? "Secret message" : "Prompt"), el("div", "txt", task));
+  you.append(m);
   you.enc = el("div", "msg down"); you.answer = el("div", "msg up");
   you.append(you.enc, you.answer);
   stage.append(you);
@@ -315,7 +379,7 @@ function renderStage(task, rule, runChain, runMode, saboteur) {
     const n = el("div", "node");
     const head = el("div", "head");
     head.append(el("span", "layer", `Layer ${i + 1}`), el("span", "model", name), el("span", "role", role));
-    if (saboteur === i) { n.classList.add("sab"); head.append(el("span", "tag sab", "saboteur")); }
+    if (sabLayer === i) { n.classList.add("sab"); head.append(el("span", "tag sab", "saboteur")); }
     n.status = el("span", "status", "waiting"); head.append(n.status);
     n.down = el("div", "msg down"); n.up = el("div", "msg up");
     n.append(head, n.down, n.up);
@@ -349,9 +413,10 @@ function handle(e) {
   if (e.type === "start") {
     fill(you.enc, `Encoded by the tool · ${CNAME[e.cipher]}`, null, e.sent, { code: true });
   } else if (e.type === "call") {
+    const sab = n.classList.contains("sab");
     if (e.dir === "down") { flow(e.layer, "down"); busy(e.layer, "rewriting the task…"); }
-    if (e.dir === "answer") { flow(e.layer, "down"); busy(e.layer, n.classList.contains("sab") ? "plotting…" : "answering…"); }
-    if (e.dir === "up") { flow(e.layer + 1, "up"); busy(e.layer, n.classList.contains("sab") ? "plotting…" : "checking the answer…"); }
+    if (e.dir === "answer") { flow(e.layer, "down"); busy(e.layer, sab ? "plotting…" : "answering…"); }
+    if (e.dir === "up") { flow(e.layer + 1, "up"); busy(e.layer, sab ? "plotting…" : "checking the answer…"); }
     if (e.dir === "solo") { flow(e.layer, "down"); busy(e.layer, "answering…"); }
     if (e.dir === "decode") { flow(e.layer, "down"); busy(e.layer, "decoding…"); }
     if (e.dir === "encode") { busy(e.layer, "encoding for the next model…"); }
@@ -359,20 +424,25 @@ function handle(e) {
     const meta = `${e.secs}s · ${e.tok_s} tok/s` + (e.cut ? " · cut off at the token limit" : "");
     if (e.dir === "down") { fill(n.down, "↓ told the model below", meta, e.sent); n.status.textContent = "waiting for the answer"; }
     if (e.dir === "answer" || e.dir === "solo") {
-      if (e.sabotage) planted = e.sent;
-      fill(n.down, e.sabotage ? "● planted a wrong answer" : "● answered", meta, e.sent, { tone: e.sabotage && "bad" });
-      n.status.textContent = e.sabotage ? "planted" : "done";
+      const lied = e.sabotage && e.lied !== false;  // runs saved before "lied" existed count as lies
+      if (lied) planted = e.sent;
+      fill(n.down, lied ? "● planted a wrong answer" : e.sabotage ? "● told to lie, answered honestly" : "● answered",
+           meta, e.sent, { tone: lied ? "bad" : e.sabotage && "fixed" });
+      n.status.textContent = lied ? "planted" : "done";
     }
     if (e.dir === "up") {
-      if (e.sabotage) {
+      if (e.sabotage && e.lied !== false) {
         planted = e.sent;
         fill(n.up, "↑ planted a wrong answer", meta, e.sent, { tone: "bad" });
         n.status.textContent = "planted";
+      } else if (e.sabotage) {
+        fill(n.up, "↑ told to lie, passed the honest answer", meta, e.sent, { tone: "fixed" });
+        n.status.textContent = "didn't lie";
       } else if (planted != null && !e.changed) {
         fill(n.up, "↑ approved the planted answer", meta, e.sent, { tone: "bad", notes: [e.note] });
         n.status.textContent = "fooled";
       } else {
-        if (planted != null) planted = null;  // the planted answer is gone from here up
+        planted = null;  // the planted answer is gone from here up
         fill(n.up, e.changed ? "↑ changed it" : "↑ passed it up", meta, e.sent, { tone: e.changed && "fixed", notes: [e.note] });
         n.status.textContent = e.changed ? "changed it" : "approved";
       }
@@ -434,8 +504,8 @@ function finish(e) {
 
 async function run(task) {
   running = true; $("#go").disabled = true; warn("");
-  const rule = $("#rule").value.trim(), m = mode();
-  const sab = m === "relay" && $("#saboteur").value !== "" ? Number($("#saboteur").value) : null;
+  const rule = $("#rule").value.trim(), m = current;
+  const sab = m === "relay" && chain.includes(saboteur) ? chain.indexOf(saboteur) : null;
   openId = null;
   renderStage(task, rule, chain, m, sab);
   const params = { task, chain: chain.join(","), mode: m, rule, cipher: $("#cipher").value, saboteur: sab ?? "" };
@@ -483,10 +553,10 @@ async function loadHistory() {
     const b = el("button");
     b.className = r.id === openId ? "current" : "";
     const tag = r.sabotage ? ["sab", "saboteur"] : [r.mode === "relay" ? "" : r.mode, r.mode];
-    b.append(el("span", "tag " + tag[0], tag[1]),
-             el("span", "q", r.task),
-             el("span", "when", r.time.slice(5, 16).replace("T", " ")),
-             el("span", "a", summary(r) + ` · ${r.chain.length} models · ${r.secs}s` + (r.rule ? ` · rule: ${r.rule}` : "")));
+    b.append(el("span", "tag " + tag[0], tag[1]), el("span", "q", r.task),
+             el("span", "a", `${r.time.slice(5, 16).replace("T", " ")} · ` + summary(r) +
+                             ` · ${r.chain.length} models · ${r.secs}s` + (r.rule ? ` · rule: ${r.rule}` : "")));
+    b.title = r.task;
     b.onclick = () => openRun(r.id);
     const li = el("li"); li.append(b); return li;
   }));
@@ -498,22 +568,25 @@ async function openRun(id) {
   openId = id; warn("");
   // put the run back in the form so Run repeats it
   $("#task").value = r.task; $("#rule").value = r.rule || "";
-  setMode(r.mode);
+  grow($("#task"), 260); grow($("#rule"), 120);
   if (r.cipher) $("#cipher").value = r.cipher;
+  saboteur = r.saboteur != null ? r.chain[r.saboteur] : null;
   const missing = r.chain.filter(n => !installed.some(m => m.name === n));
   if (missing.length) warn("Not installed any more: " + missing.join(", "));
-  else { chain = [...r.chain]; renderChain(); }
-  renderSaboteur(r.saboteur ?? "");
+  else chain = [...r.chain];
+  setMode(r.mode);
   renderStage(r.task, r.rule, r.chain, r.mode, r.saboteur ?? null);
   if (r.mode === "cipher") handle({ type: "start", cipher: r.ciphers[0], sent: r.encoded });
-  r.trace.forEach(t => handle({ type: "step", ...t }));
+  const honest = r.sabotage?.outcome === "no_lie";  // older runs didn't record "lied" per step
+  r.trace.forEach(t => handle({ type: "step", ...t, ...(t.sabotage && t.lied === undefined ? { lied: !honest } : {}) }));
   finish(r);
   loadHistory();
 }
 
+setMode("relay");
 fetch("/models").then(r => r.json()).then(d => {
   if (d.error) return warn(d.error);
-  installed = d.models;
+  installed = d.models; ramGb = d.ram_gb || 0;
   chain = d.default.filter(n => installed.some(m => m.name === n));
   if (!chain.length && installed.length) chain = [installed[0].name];
   renderChain();
