@@ -64,7 +64,8 @@
   .chainlist { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
   .row { display: grid; grid-template-columns: auto auto 1fr auto auto; align-items: center; gap: 8px;
          padding: 7px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg);
-         cursor: grab; user-select: none; touch-action: none; }
+         cursor: grab; user-select: none; touch-action: none; position: relative;
+         transition: transform .18s cubic-bezier(.2, .8, .2, 1), box-shadow .15s; }
   .row .grip { color: var(--muted); letter-spacing: -2px; }
   .row .n { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; width: 1.2em; text-align: right; }
   .row .name { font-family: var(--mono); font-size: 13px; font-weight: 600; min-width: 0;
@@ -75,9 +76,9 @@
   .row .sabbtn { border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; font-size: 11px; }
   .row .sabbtn[aria-pressed=true] { background: var(--bad); border-color: var(--bad); color: #fff; }
   .row.sab { border-color: var(--bad); background: var(--bad-soft); }
-  .row.dragging { opacity: .4; }
-  .row.over { box-shadow: 0 -3px 0 var(--accent); }
-  .row.over.below { box-shadow: 0 3px 0 var(--accent); }
+  .row.lifted { z-index: 2; cursor: grabbing; transition: box-shadow .15s;
+               box-shadow: 0 10px 24px rgba(0, 0, 0, .28); border-color: var(--accent); }
+  @media (prefers-reduced-motion: reduce) { .row, .row.lifted { transition: none; } }
   .row:focus-visible { outline-offset: 1px; }
   #add { width: 100%; margin-top: 8px; }
   .mem { font-size: 12px; color: var(--muted); margin: 10px 0 0; }
@@ -289,12 +290,16 @@ function remove(i) {
   if (chain[i] === saboteur) saboteur = null;
   chain.splice(i, 1); renderChain();
 }
+const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+let settling = false;
 function renderChain() {
   $("#chainHint").textContent = MODES[current].chain;
-  const list = $("#chain"); list.replaceChildren();
+  const list = $("#chain"), before = {};
+  list.querySelectorAll(".row").forEach(r => before[r.dataset.name] = r.getBoundingClientRect().top);
+  list.replaceChildren();
   chain.forEach((name, i) => {
     const row = el("li", "row" + (current === "relay" && name === saboteur ? " sab" : ""));
-    row.tabIndex = 0; row.dataset.i = i;
+    row.tabIndex = 0; row.dataset.i = i; row.dataset.name = name;
     row.setAttribute("aria-label", `Layer ${i + 1}: ${name}. Arrow keys move it, Delete removes it.`);
     const label = el("span", "name", name); label.append(el("small", null, `${gb(name)} GB`));
     row.append(el("span", "grip", "⋮⋮"), el("span", "n", `${i + 1}`), label);
@@ -317,6 +322,14 @@ function renderChain() {
     };
     list.append(row);
   });
+  // slide every row from where it was to where it is now
+  if (!reduceMotion) list.querySelectorAll(".row").forEach(r => {
+    const d = (before[r.dataset.name] ?? r.getBoundingClientRect().top) - r.getBoundingClientRect().top;
+    if (!d) return;
+    r.style.transition = "none"; r.style.transform = `translateY(${d}px)`;
+    void r.offsetHeight;
+    r.style.transition = ""; r.style.transform = "";
+  });
 
   const add = $("#add"), rest = installed.filter(m => !chain.includes(m.name));
   const first = el("option", null, rest.length ? "+ Add a model" : "All installed models are in the chain");
@@ -334,26 +347,40 @@ $("#sortBig").onclick = () => { chain.sort((a, b) => gb(b) - gb(a)); renderChain
 $("#flip").onclick = () => { chain.reverse(); renderChain(); };
 
 function drag(e, row, from) {
-  if (e.button !== 0 || e.target.closest("button")) return;
+  if (e.button !== 0 || e.target.closest("button") || settling) return;
+  const rows = [...$("#chain").children], tops = rows.map(r => r.getBoundingClientRect().top);
+  const step = rows.length > 1 ? tops[1] - tops[0] : 0;  // rows are all the same height
   const x0 = e.clientX, y0 = e.clientY;
-  let target = null, moved = false;
+  let to = from, moved = false;
   row.setPointerCapture(e.pointerId);
-  const clear = () => document.querySelectorAll(".row.over").forEach(r => r.classList.remove("over", "below"));
-  const over = ev => {
+  const onMove = ev => {
     if (!moved && Math.hypot(ev.clientX - x0, ev.clientY - y0) < 4) return;  // still a click
-    moved = true; row.classList.add("dragging"); clear();
-    const hit = document.elementFromPoint(ev.clientX, ev.clientY)?.closest(".row");
-    target = hit && hit !== row ? Number(hit.dataset.i) : null;
-    if (target != null) hit.classList.add("over", ...(target > from ? ["below"] : []));
+    if (!moved) { moved = true; row.classList.add("lifted"); }
+    const dy = Math.max(tops[0] - tops[from] - step / 3,
+                        Math.min(tops[tops.length - 1] - tops[from] + step / 3, ev.clientY - y0));
+    row.style.transform = `translateY(${dy}px)`;
+    to = step ? Math.max(0, Math.min(rows.length - 1, from + Math.round(dy / step))) : from;
+    rows.forEach((r, j) => {
+      if (r === row) return;
+      const shift = from < to && j > from && j <= to ? -step : to < from && j >= to && j < from ? step : 0;
+      r.style.transform = shift ? `translateY(${shift}px)` : "";
+    });
   };
-  const up = () => {
-    row.removeEventListener("pointermove", over);
-    row.classList.remove("dragging"); clear();
-    if (target != null) move(from, target);
+  const onUp = () => {
+    row.removeEventListener("pointermove", onMove);
+    if (!moved) return;
+    settling = true;
+    row.classList.remove("lifted");  // brings the transition back, so it eases into the slot
+    row.style.transform = `translateY(${tops[to] - tops[from]}px)`;
+    setTimeout(() => {
+      if (to !== from) { const [m] = chain.splice(from, 1); chain.splice(to, 0, m); }
+      renderChain();
+      settling = false;
+    }, reduceMotion ? 0 : 180);
   };
-  row.addEventListener("pointermove", over);
-  row.addEventListener("pointerup", up, { once: true });
-  row.addEventListener("pointercancel", up, { once: true });
+  row.addEventListener("pointermove", onMove);
+  row.addEventListener("pointerup", onUp, { once: true });
+  row.addEventListener("pointercancel", onUp, { once: true });
 }
 
 // ---- the stage: You at the top, one card per model, a wire above each card ----
