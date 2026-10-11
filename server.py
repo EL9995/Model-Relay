@@ -5,7 +5,6 @@ Run:   python3 server.py        then open http://localhost:8765
 """
 
 import json
-import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -30,6 +29,14 @@ class Handler(BaseHTTPRequestHandler):
             except OSError as e:
                 body = {"error": f"Can't reach Ollama at {relay.OLLAMA}. Is the app running? ({e})"}
             self.reply(200, "application/json", json.dumps(body).encode())
+        elif url.path == "/runs":
+            self.reply(200, "application/json", json.dumps(relay.list_runs()).encode())
+        elif url.path.startswith("/runs/"):
+            r = relay.load_run(url.path[len("/runs/"):])
+            if r:
+                self.reply(200, "application/json", json.dumps(r, ensure_ascii=False).encode())
+            else:
+                self.reply(404, "text/plain", b"no such run")
         elif url.path == "/run" and q.get("task"):
             self.run_relay(q["task"], [m for m in q.get("chain", "").split(",") if m],
                            q.get("mode", "relay"), q.get("rule", ""))
@@ -47,16 +54,9 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(f"data: {json.dumps(event)}\n\n".encode())
             self.wfile.flush()
 
-        chain = chain or relay.DEFAULT_CHAIN.split(",")
-        start = time.time()
         try:
-            if mode == "blind":
-                answer, trace = None, relay.blind(task, chain, rule, send)
-            else:
-                answer, trace = relay.relay(task, chain, rule, send)
-            peak = max(relay.snapshots, key=len) if relay.snapshots else []
-            send({"type": "done", "mode": mode, "answer": answer, "secs": round(time.time() - start, 1),
-                  "calls": len(trace), "peak": peak})
+            r = relay.run(task, chain or relay.DEFAULT_CHAIN.split(","), mode, rule, send)
+            send({"type": "done", **{k: v for k, v in r.items() if k != "trace"}})
         except (BrokenPipeError, ConnectionResetError):
             pass  # the page was closed mid-run
         except Exception as e:

@@ -15,12 +15,15 @@ Run:   python3 relay.py "2+2"
 
 import argparse
 import json
+import re
 import sys
 import time
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 OLLAMA = "http://localhost:11434"
+RUNS = Path(__file__).with_name("runs")  # every run is saved here as one JSON file
 DEFAULT_CHAIN = "granite4.2:8b,gemma3:4b,granite4.2:3b,gemma3:1b"
 NUM_CTX = 2048      # small context keeps each model's memory down
 KEEP_ALIVE = "10m"  # keep every layer loaded so the way back up is fast
@@ -118,6 +121,7 @@ def relay(task, chain, rule="", on_event=lambda e: None):
         return ask(model, prompt, kind, rule)
 
     def step(layer, entry):
+        entry["layer"] = layer
         trace.append(entry)
         on_event({"type": "step", "layer": layer, **entry})
 
@@ -158,10 +162,57 @@ def blind(task, chain, rule="", on_event=lambda e: None):
         on_event({"type": "call", "dir": "solo", "layer": i, "model": model})
         out, secs, tps = ask(model, task, "bottom", rule, BLIND_TOKENS)
         entry = {"dir": "solo", "model": model, "sent": out["answer"], "secs": secs, "tok_s": tps,
-                 "cut": out["cut"]}
+                 "cut": out["cut"], "layer": i}
         trace.append(entry)
         on_event({"type": "step", "layer": i, **entry})
     return trace
+
+
+def run(task, chain, mode="relay", rule="", on_event=lambda e: None, save=True):
+    """Run one relay or blind pass and return its record, saved to runs/ unless save=False."""
+    start = time.time()
+    if mode == "blind":
+        answer, trace = None, blind(task, chain, rule, on_event)
+    else:
+        answer, trace = relay(task, chain, rule, on_event)
+    record = {"mode": mode, "task": task, "rule": rule, "chain": chain, "answer": answer,
+              "secs": round(time.time() - start, 1), "calls": len(trace),
+              "peak": max(([m for m in snap if m in chain] for snap in snapshots), key=len, default=[]),
+              "trace": trace}
+    return save_run(record) if save else record
+
+
+def save_run(record):
+    RUNS.mkdir(exist_ok=True)
+    stamp = time.strftime("%Y-%m-%d_%H%M%S")
+    slug = re.sub(r"[^a-z0-9]+", "-", record["task"].lower()).strip("-")[:40].strip("-") or "run"
+    rid, n = f"{stamp}_{slug}", 2
+    while (RUNS / f"{rid}.json").exists():
+        rid, n = f"{stamp}_{slug}-{n}", n + 1
+    record = {"id": rid, "time": time.strftime("%Y-%m-%dT%H:%M:%S"), **record}
+    (RUNS / f"{rid}.json").write_text(json.dumps(record, indent=2, ensure_ascii=False))
+    return record
+
+
+def load_run(rid):
+    """One saved run by id, or None. Ids are file names, so only plain ones are allowed."""
+    path = RUNS / f"{rid}.json"
+    if not re.fullmatch(r"[\w-]+", rid) or not path.is_file():
+        return None
+    return json.loads(path.read_text())
+
+
+def list_runs():
+    """Saved runs, newest first, without their traces."""
+    runs = []
+    for path in sorted(RUNS.glob("*.json"), reverse=True):
+        try:
+            r = json.loads(path.read_text())
+        except ValueError:
+            continue
+        runs.append({k: r.get(k) for k in ("id", "time", "mode", "task", "rule", "chain", "answer",
+                                           "secs", "calls")})
+    return runs
 
 
 def main():
@@ -172,48 +223,33 @@ def main():
     p.add_argument("--blind", action="store_true",
                    help="every model answers the original task on its own; no relay")
     p.add_argument("--rule", default="", help="a rule every model must follow (system prompt)")
+    p.add_argument("--no-save", action="store_true", help="don't save this run to runs/")
     a = p.parse_args()
     chain = [m.strip() for m in a.chain.split(",") if m.strip()]
 
-    start = time.time()
-    if a.blind:
-        start = time.time()
-        trace = blind(a.task, chain, a.rule)
-        if a.json:
-            print(json.dumps({"task": a.task, "chain": chain, "rule": a.rule,
-                              "secs": round(time.time() - start, 1), "trace": trace}, indent=2))
-            return
-        print(f"TASK  {a.task}\n")
-        for t in trace:
-            cut = "  (cut off)" if t["cut"] else ""
-            print(f"● {t['model']:<16} {t['secs']:>5}s {t['tok_s']:>4} tok/s{cut}\n    {t['sent']}")
-        print(f"\nTIME    {round(time.time() - start, 1)}s for {len(trace)} calls")
-        return
-    answer, trace = relay(a.task, chain, a.rule)
-    mem = loaded()
-    result = {"task": a.task, "chain": chain, "answer": answer, "secs": round(time.time() - start, 1),
-              "trace": trace,
-              "loaded": [{"model": n, "gb": round(s / 1e9, 1), "gpu_pct": round(100 * v / s) if s else 0}
-                         for n, s, v in mem]}
+    r = run(a.task, chain, "blind" if a.blind else "relay", a.rule, save=not a.no_save)
     if a.json:
-        print(json.dumps(result, indent=2))
+        print(json.dumps(r, indent=2, ensure_ascii=False))
         return
 
-    arrows = {"down": "↓", "answer": "●", "up": "↑"}
+    arrows = {"down": "↓", "answer": "●", "up": "↑", "solo": "●"}
     print(f"TASK  {a.task}\n")
-    for t in trace:
-        flag = ""
+    for t in r["trace"]:
+        flag = "  (cut off)" if t.get("cut") else ""
         if t["dir"] == "up":
             flag = "  (corrected)" if t["changed"] else "  (ok)"
         print(f"{arrows[t['dir']]} {t['model']:<16} {t['secs']:>5}s {t['tok_s']:>4} tok/s{flag}")
         print(f"    {t['sent']}")
-    in_chain = [m for m in result["loaded"] if m["model"] in chain]
-    peak = max(snapshots, key=len)
-    print(f"PEAK    {len(peak)}/{len(chain)} models loaded at once: {', '.join(peak)}")
-    print(f"\nANSWER  {answer}")
-    print(f"TIME    {result['secs']}s for {len(trace)} calls")
-    print(f"MEMORY  {sum(m['gb'] for m in in_chain):.1f} GB across {len(in_chain)}/{len(chain)} "
-          f"models still loaded: " + ", ".join(f"{m['model']} {m['gb']}GB" for m in in_chain))
+    print(f"\nPEAK    {len(r['peak'])}/{len(chain)} models loaded at once: {', '.join(r['peak'])}")
+    if r["answer"] is not None:
+        print(f"ANSWER  {r['answer']}")
+    print(f"TIME    {r['secs']}s for {r['calls']} calls")
+    if not a.blind:
+        in_chain = [(n, round(sz / 1e9, 1)) for n, sz, _ in loaded() if n in chain]
+        print(f"MEMORY  {sum(g for _, g in in_chain):.1f} GB across {len(in_chain)}/{len(chain)} "
+              f"models still loaded: " + ", ".join(f"{n} {g}GB" for n, g in in_chain))
+    if "id" in r:
+        print(f"SAVED   runs/{r['id']}.json")
 
 
 if __name__ == "__main__":

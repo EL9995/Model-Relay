@@ -28,6 +28,10 @@ To watch it run, start the web page and open http://localhost:8765:
 python3 server.py
 ```
 
+Every run, from the page or the command line, is saved as one JSON file in `runs/` (git-ignored):
+the prompt, rule, mode, chain, every message each model sent, timings, and the final answer.
+The page's **Saved runs** list opens any of them again. Add `--no-save` to skip saving.
+
 ## Findings so far (2026-10-10, M5 Air 16 GB)
 
 - Default chain `granite4.2:8b → gemma3:4b → granite4.2:3b → gemma3:1b`: "2+2" in ~13 s.

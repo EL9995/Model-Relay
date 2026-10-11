@@ -49,6 +49,22 @@
   .hint { font-size: 13px; color: var(--muted); flex: 1; min-width: 200px; }
   .rule { width: 100%; margin-top: 10px; font: inherit; font-size: 14px; padding: 8px 12px; border-radius: 8px;
           border: 1px dashed var(--line); background: var(--bg); color: var(--ink); }
+  .history { margin-top: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
+  .history summary { padding: 10px 16px; cursor: pointer; font-weight: 600; font-size: 14px; }
+  .history summary span { color: var(--muted); font-weight: 400; }
+  .history ol { list-style: none; margin: 0; padding: 0 8px 8px; max-height: 320px; overflow-y: auto; }
+  .history li button { all: unset; box-sizing: border-box; width: 100%; display: grid; cursor: pointer;
+          grid-template-columns: auto 1fr auto; gap: 2px 10px; padding: 8px; border-radius: 8px; font-size: 13px; }
+  .history li button:hover, .history li button:focus-visible { background: var(--bg); }
+  .history li button.current { background: var(--accent-soft); }
+  .history .when { color: var(--muted); font-family: var(--mono); font-size: 12px; }
+  .history .q { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .history .a { color: var(--muted); font-size: 12px; grid-column: 2 / 4; overflow: hidden;
+          text-overflow: ellipsis; white-space: nowrap; }
+  .tag { font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 999px;
+         background: var(--accent-soft); color: var(--accent); }
+  .tag.blind { background: var(--up-soft); color: var(--up); }
+  .empty { color: var(--muted); font-size: 13px; padding: 4px 8px 8px; }
   .banner { margin-top: 16px; padding: 10px 14px; border-radius: 8px; background: var(--warn-soft);
             color: var(--warn); display: none; }
   .banner.show { display: block; }
@@ -116,6 +132,10 @@
            placeholder="Rule every model must follow (optional), e.g. Answer in one sentence.">
     <div class="chain" id="chain"></div>
   </form>
+  <details class="history" id="history">
+    <summary>Saved runs <span id="hcount"></span></summary>
+    <ol id="hlist"></ol>
+  </details>
   <div class="banner" id="banner"></div>
 
   <div id="stage"></div>
@@ -164,8 +184,8 @@ function renderChain() {
 
 // ---- the stage: You at the top, one card per model, a wire above each card ----
 let nodes = [], wires = [], you;
-function renderStage(task, rule) {
-  const blindMode = mode() === "blind";
+function renderStage(task, rule, runChain = chain, runMode = mode()) {
+  const blindMode = runMode === "blind";
   const stage = $("#stage"); stage.replaceChildren(); nodes = []; wires = [];
   you = el("div", "node you");
   const h = el("div", "head"); h.append(el("span", "model", "You"), el("span", "status", ""));
@@ -176,9 +196,9 @@ function renderStage(task, rule) {
   you.append(you.answer);
   stage.append(you);
 
-  chain.forEach((name, i) => {
+  runChain.forEach((name, i) => {
     const w = el("div", "wire"); w.append(el("i")); wires.push(w); stage.append(w);
-    const bottom = i === chain.length - 1;
+    const bottom = i === runChain.length - 1;
     const n = el("div", "node");
     const head = el("div", "head");
     head.append(el("span", "layer", `Layer ${i + 1}`), el("span", "model", name),
@@ -228,7 +248,8 @@ function handle(e) {
   } else if (e.type === "done" && e.mode === "blind") {
     flow(null);
     you.answer.replaceChildren(lbl("Done"), el("div", "stats",
-      `${e.calls} models answered in ${e.secs}s · at most ${e.peak.length} in memory at once · compare their answers below`));
+      `${e.calls} models answered in ${e.secs}s · at most ${e.peak.length} in memory at once · compare their answers below`),
+      saved(e));
     you.answer.classList.add("show");
     you.scrollIntoView({ block: "nearest", behavior: "smooth" });
   } else if (e.type === "done") {
@@ -236,7 +257,8 @@ function handle(e) {
     setTimeout(() => {
       flow(null);
       you.answer.replaceChildren(lbl("Final answer"), el("div", "final", e.answer),
-        el("div", "stats", `${e.secs}s · ${e.calls} model calls · at most ${e.peak.length} of ${chain.length} models in memory at once`));
+        el("div", "stats", `${e.secs}s · ${e.calls} model calls · at most ${e.peak.length} of ${e.chain.length} models in memory at once`),
+        saved(e));
       you.answer.classList.add("show");
       you.scrollIntoView({ block: "nearest", behavior: "smooth" });
     }, 700);
@@ -267,6 +289,49 @@ async function run(task) {
     warn("Lost the connection to server.py: " + err.message);
   }
   running = false; $("#go").disabled = false;
+  loadHistory();
+}
+
+// ---- saved runs ----
+function saved(e) {
+  return el("div", "stats", e.id ? `Saved ${e.time.replace("T", " ")} · runs/${e.id}.json` : "Not saved");
+}
+
+let openId = null;
+async function loadHistory() {
+  let runs = [];
+  try { runs = await (await fetch("/runs")).json(); } catch { return; }
+  $("#hcount").textContent = `(${runs.length})`;
+  const list = $("#hlist");
+  if (!runs.length) return list.replaceChildren(el("li", "empty", "Nothing yet. Every run you do is saved here."));
+  list.replaceChildren(...runs.map(r => {
+    const b = el("button");
+    b.className = r.id === openId ? "current" : "";
+    b.append(el("span", "tag" + (r.mode === "blind" ? " blind" : ""), r.mode),
+             el("span", "q", r.task),
+             el("span", "when", r.time.slice(5, 16).replace("T", " ")),
+             el("span", "a", (r.answer != null ? "→ " + r.answer : `${r.calls} answers`) +
+                             ` · ${r.chain.length} models · ${r.secs}s` + (r.rule ? ` · rule: ${r.rule}` : "")));
+    b.onclick = () => openRun(r.id);
+    const li = el("li"); li.append(b); return li;
+  }));
+}
+
+async function openRun(id) {
+  if (running) return;
+  const r = await (await fetch("/runs/" + encodeURIComponent(id))).json();
+  openId = id; warn("");
+  // put the run back in the form so Run repeats it
+  $("#task").value = r.task; $("#rule").value = r.rule || "";
+  document.querySelector(`input[name=mode][value=${r.mode}]`).checked = true;
+  $("#hint").textContent = HINTS[r.mode];
+  const missing = r.chain.filter(n => !installed.some(m => m.name === n));
+  if (missing.length) warn("Not installed any more: " + missing.join(", "));
+  else { chain = [...r.chain]; renderChain(); }
+  renderStage(r.task, r.rule, r.chain, r.mode);
+  r.trace.forEach(t => handle({ type: "step", ...t }));
+  handle({ type: "done", ...r });
+  loadHistory();
 }
 
 $("#form").onsubmit = ev => {
@@ -281,6 +346,7 @@ fetch("/models").then(r => r.json()).then(d => {
   chain = d.default.filter(n => installed.some(m => m.name === n));
   if (!chain.length && installed.length) chain = [installed[0].name];
   renderChain();
+  loadHistory();
 }).catch(() => warn("Can't reach server.py. Start it with: python3 server.py"));
 </script>
 </body>
