@@ -20,6 +20,10 @@ The point is the plumbing and the limits, not solving problems.
   next (base64, ROT13, Caesar +3, reverse, or a different one each hop). The tool knows the ciphers,
   so every step is checked exactly and the run shows where the message first broke.
 
+- **Translate**: a telephone game. Each layer translates the text into its language (picked per
+  position in the chain); the last one always translates back to English, shown next to the original
+  with a rough word-match score. Text in clearly the wrong writing system is flagged.
+
 The chain can be in any order (drag the models on the page, or `--chain`), including smallest on top.
 
 ## Run
@@ -34,6 +38,7 @@ python3 relay.py --blind "How many r's are in strawberry?"   # every model answe
 python3 relay.py --rule "Answer with just the number." "2+2"  # a rule every model must follow
 python3 relay.py --saboteur 4 "What is 7 times 8?"           # layer 4 plants a wrong answer
 python3 relay.py --cipher mix "meet at noon"                  # pass a secret message down
+python3 relay.py --translate Spanish,Japanese,French "Break a leg tonight!"  # translation telephone
 ```
 
 To watch it run, start the web page and open http://localhost:8765:
@@ -59,3 +64,7 @@ The page's **Saved runs** list opens any of them again. Add `--no-save` to skip 
   "meet at noon" arrived at the bottom as "hello", first broken by granite4.2:8b's ROT13.
 - Saboteur at the bottom of "What is 7 times 8?" planted "15". granite4.2:3b approved it;
   gemma3:4b, one layer up, caught it and restored 56.
+- Translate, English → Spanish → Japanese → Korean → English: "It's raining cats and dogs, so let's
+  call it a day" came back as "The rain is falling, so let's spend one day". granite4.2:8b knew the
+  Spanish idiom for raining cats and dogs but translated "call it a day" literally; granite4.2:3b
+  was asked for Korean and copied the Japanese instead.

@@ -9,6 +9,7 @@
     --bg: #f6f5f1; --surface: #ffffff; --ink: #1d1d1b; --muted: #6b6a64; --line: #e2e0d8;
     --accent: #2f6fdb; --accent-soft: #e6eefc; --up: #1f8a5b; --up-soft: #e3f4ec;
     --warn: #b7600b; --warn-soft: #fbeedd; --bad: #c0392b; --bad-soft: #fbe5e2;
+    --violet: #7048c8; --violet-soft: #efe9fb;
     --mono: ui-monospace, "SF Mono", Menlo, monospace;
   }
   @media (prefers-color-scheme: dark) {
@@ -16,6 +17,7 @@
       --bg: #141414; --surface: #1e1e1d; --ink: #ecebe6; --muted: #9a998f; --line: #34332f;
       --accent: #6c9cf0; --accent-soft: #1d2a40; --up: #4cc08a; --up-soft: #16302a;
       --warn: #e59a4a; --warn-soft: #3a2a17; --bad: #ef6b5b; --bad-soft: #3d1d1a;
+      --violet: #ad8cf2; --violet-soft: #2a2140;
     }
   }
   * { box-sizing: border-box; }
@@ -81,6 +83,15 @@
   @media (prefers-reduced-motion: reduce) { .row, .row.lifted { transition: none; } }
   .row:focus-visible { outline-offset: 1px; }
   #add { width: 100%; margin-top: 8px; }
+  .row .lang { font-size: 12px; padding: 2px 4px; max-width: 108px; }
+  .row .fixed-lang { font-size: 12px; color: var(--muted); padding-right: 4px; }
+  .route { font-size: 13px; line-height: 1.7; }
+  .route b { font-weight: 600; color: var(--violet); }
+  .pbtns { display: flex; gap: 6px; margin-top: 10px; }
+  .compare { display: grid; gap: 8px; margin-top: 10px; }
+  .compare div { padding: 8px 12px; border-radius: 8px; background: var(--bg); }
+  .compare small { display: block; font-size: 11px; font-weight: 600; text-transform: uppercase;
+                   letter-spacing: .04em; color: var(--muted); }
   .mem { font-size: 12px; color: var(--muted); margin: 10px 0 0; }
   .mem.tight { color: var(--warn); }
 
@@ -119,6 +130,7 @@
   .tag.blind { background: var(--up-soft); color: var(--up); }
   .tag.cipher { background: var(--warn-soft); color: var(--warn); }
   .tag.sab { background: var(--bad-soft); color: var(--bad); }
+  .tag.translate { background: var(--violet-soft); color: var(--violet); }
   .empty { color: var(--muted); font-size: 13px; padding: 4px 8px 8px; }
 
   /* ---- stage ---- */
@@ -189,6 +201,7 @@
       <button type="button" role="tab" data-mode="relay">Relay</button>
       <button type="button" role="tab" data-mode="blind">Blind</button>
       <button type="button" role="tab" data-mode="cipher">Cipher</button>
+      <button type="button" role="tab" data-mode="translate">Translate</button>
     </div>
   </div>
 </header>
@@ -232,6 +245,15 @@
         <option value="mix">Mix: a different cipher each step</option>
       </select>
     </section>
+    <section class="panel" id="translatePanel" hidden>
+      <div class="phead"><h2>Route</h2></div>
+      <p class="phint">Pick each model's language in the chain above. The last one always translates back to English.</p>
+      <div class="route" id="route"></div>
+      <div class="pbtns">
+        <button type="button" class="ghost" id="shuffle">Shuffle</button>
+        <button type="button" class="ghost" id="resetRoute">Reset</button>
+      </div>
+    </section>
     <details class="panel history">
       <summary>Saved runs <span id="hcount"></span></summary>
       <ol id="hlist"></ol>
@@ -250,7 +272,8 @@ const el = (tag, cls, text) => {
   return e;
 };
 let installed = [], chain = [], ramGb = 0, running = false, openId = null;
-let current = "relay", saboteur = null;  // saboteur is a model name, so it follows the model when you reorder
+let current = "relay", saboteur = null;
+let languages = [], defaultRoute = [], route = [];  // route: one language per position, not per model  // saboteur is a model name, so it follows the model when you reorder
 const gb = name => (installed.find(m => m.name === name) || {}).gb || 0;
 const CNAME = { base64: "base64", rot13: "ROT13", caesar: "Caesar +3", reverse: "reverse", mix: "mix" };
 
@@ -278,6 +301,9 @@ const MODES = {
   cipher: { hint: "Your message is encoded and passed down. Each model decodes it and re-encodes it for the next, and the tool checks every step.",
             placeholder: "A secret message… e.g. meet at noon",
             chain: "Top to bottom. Drag to reorder." },
+  translate: { hint: "Each model translates the text into its language, then hands it on. The last one translates back to English so you can compare.",
+               placeholder: "Something to translate… e.g. Break a leg tonight, it'll be a piece of cake.",
+               chain: "Top to bottom. Each model translates into the language beside it. Drag to reorder; the languages stay in place." },
 };
 function setMode(m) {
   current = m;
@@ -285,6 +311,7 @@ function setMode(m) {
   $("#hint").textContent = MODES[m].hint;
   $("#task").placeholder = MODES[m].placeholder;
   $("#cipherPanel").hidden = m !== "cipher";
+  $("#translatePanel").hidden = m !== "translate";
   renderChain();
 }
 document.querySelectorAll(".tabs button").forEach(b => b.onclick = () => setMode(b.dataset.mode));
@@ -305,6 +332,8 @@ const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
 let settling = false;
 function renderChain() {
   $("#chainHint").textContent = MODES[current].chain;
+  while (route.length < chain.length - 1) route.push(defaultRoute[route.length % defaultRoute.length] || "Spanish");
+  renderRoute();
   const list = $("#chain"), before = {};
   list.querySelectorAll(".row").forEach(r => before[r.dataset.name] = r.getBoundingClientRect().top);
   list.replaceChildren();
@@ -314,7 +343,16 @@ function renderChain() {
     row.setAttribute("aria-label", `Layer ${i + 1}: ${name}. Arrow keys move it, Delete removes it.`);
     const label = el("span", "name", name); label.append(el("small", null, `${gb(name)} GB`));
     row.append(el("span", "grip", "⋮⋮"), el("span", "n", `${i + 1}`), label);
-    if (current === "relay") {
+    if (current === "translate") {
+      if (i === chain.length - 1) row.append(el("span", "fixed-lang", "→ English"));
+      else {
+        const sel = el("select", "lang"); sel.setAttribute("aria-label", `Language for layer ${i + 1}`);
+        languages.forEach(l => { const o = el("option", null, l); o.value = l; sel.append(o); });
+        sel.value = route[i];
+        sel.onchange = () => { route[i] = sel.value; renderRoute(); };
+        row.append(sel);
+      }
+    } else if (current === "relay") {
       const s = el("button", "sabbtn", "Saboteur"); s.type = "button";
       s.setAttribute("aria-pressed", name === saboteur);
       s.title = "Make this model secretly plant a wrong answer";
@@ -354,11 +392,22 @@ function renderChain() {
   $("#mem").classList.toggle("tight", !!tight);
 }
 $("#add").onchange = e => { if (e.target.value) { chain.push(e.target.value); renderChain(); } };
+const routeNow = () => [...route.slice(0, chain.length - 1), "English"];
+function renderRoute() {
+  const box = $("#route"); box.replaceChildren(el("span", null, "English"));
+  routeNow().forEach(l => { box.append(" → "); box.append(el("b", null, l)); });
+}
+$("#shuffle").onclick = () => {
+  const pool = [...languages].sort(() => Math.random() - 0.5);
+  route = route.map((_, i) => pool[i % pool.length]);
+  renderChain();
+};
+$("#resetRoute").onclick = () => { route = []; renderChain(); };
 $("#sortBig").onclick = () => { chain.sort((a, b) => gb(b) - gb(a)); renderChain(); };
 $("#flip").onclick = () => { chain.reverse(); renderChain(); };
 
 function drag(e, row, from) {
-  if (e.button !== 0 || e.target.closest("button") || settling) return;
+  if (e.button !== 0 || e.target.closest("button, select") || settling) return;
   const rows = [...$("#chain").children], tops = rows.map(r => r.getBoundingClientRect().top);
   const step = rows.length > 1 ? tops[1] - tops[0] : 0;  // rows are all the same height
   const x0 = e.clientX, y0 = e.clientY;
@@ -396,7 +445,7 @@ function drag(e, row, from) {
 
 // ---- the stage: You at the top, one card per model, a wire above each card ----
 let nodes = [], wires = [], you, planted = null;
-function renderStage(task, rule, runChain, runMode, sabLayer) {
+function renderStage(task, rule, runChain, runMode, sabLayer, langs = []) {
   const stage = $("#stage"); stage.replaceChildren(); nodes = []; wires = []; planted = null;
   const bar = el("div", "stagebar");
   const all = (fold, text) => { const b = el("button", "ghost", text); b.type = "button";
@@ -418,7 +467,8 @@ function renderStage(task, rule, runChain, runMode, sabLayer) {
     const w = el("div", "wire"); w.append(el("i")); wires.push(w); stage.append(w);
     const bottom = i === runChain.length - 1;
     const role = { relay: bottom ? "answers" : "rewrites ↓ · checks ↑", blind: "answers on its own",
-                   cipher: bottom ? "decodes" : "decodes · re-encodes ↓" }[runMode];
+                   cipher: bottom ? "decodes" : "decodes · re-encodes ↓",
+                   translate: bottom ? "translates back to English" : `translates into ${langs[i]}` }[runMode];
     const n = el("div", "node");
     const head = el("div", "head");
     head.append(el("span", "layer", `Layer ${i + 1}`), el("span", "model", name), el("span", "role", role));
@@ -473,6 +523,7 @@ function handle(e) {
     if (e.dir === "solo") { flow(e.layer, "down"); busy(e.layer, "answering…"); }
     if (e.dir === "decode") { flow(e.layer, "down"); busy(e.layer, "decoding…"); }
     if (e.dir === "encode") { busy(e.layer, "encoding for the next model…"); }
+    if (e.dir === "translate") { flow(e.layer, "down"); busy(e.layer, `translating into ${e.lang}…`); }
   } else if (e.type === "step") {
     const meta = `${e.secs}s · ${e.tok_s} tok/s` + (e.cut ? " · cut off at the token limit" : "");
     if (e.dir === "down") { fill(n.down, "↓ told the model below", meta, e.sent); n.status.textContent = "waiting for the answer"; }
@@ -500,6 +551,11 @@ function handle(e) {
         n.status.textContent = e.changed ? "changed it" : "approved";
       }
     }
+    if (e.dir === "translate") {
+      fill(n.down, `→ ${e.lang}`, meta, e.sent,
+           { notes: [!e.script_ok && `This doesn't look like ${e.lang}.`], tone: !e.script_ok && "bad" });
+      n.status.textContent = "done";
+    }
     if (e.dir === "decode" || e.dir === "encode") {
       const notes = [
         e.ok === false && `Should be: ${e.want}`,
@@ -524,6 +580,16 @@ function finish(e) {
   if (e.mode === "blind") {
     parts.push(lbl("Done"), el("div", "stats",
       `${e.calls} models answered in ${e.secs}s · at most ${e.peak.length} in memory at once · compare their answers below`));
+  } else if (e.mode === "translate") {
+    const pct = Math.round(e.match * 100);
+    const [text, tone] = pct >= 70 ? ["Mostly survived", "good"] : pct >= 35 ? ["Drifted", ""] : ["Lost in translation", "bad"];
+    const cmp = el("div", "compare");
+    const side = (label, t) => { const d = el("div"); d.append(el("small", null, label), el("div", "txt", t)); return d; };
+    cmp.append(side("You wrote", e.task), side("Came back as", e.answer));
+    parts.push(lbl("Back in English"), cmp,
+      el("div", "verdict " + tone, `${text} · ${pct}% of the wording matches`),
+      el("div", "stats", "The match only counts shared words, so a good paraphrase can still score low. Compare them yourself."),
+      el("div", "stats", `${e.secs}s · route: English → ${e.langs.join(" → ")}`));
   } else if (e.mode === "cipher") {
     const b = e.broke_at;
     parts.push(lbl("Message at the bottom"), el("div", "final", e.answer || "(nothing)"),
@@ -560,8 +626,9 @@ async function run(task) {
   const rule = $("#rule").value.trim(), m = current;
   const sab = m === "relay" && chain.includes(saboteur) ? chain.indexOf(saboteur) : null;
   openId = null;
-  renderStage(task, rule, chain, m, sab);
-  const params = { task, chain: chain.join(","), mode: m, rule, cipher: $("#cipher").value, saboteur: sab ?? "" };
+  renderStage(task, rule, chain, m, sab, routeNow());
+  const params = { task, chain: chain.join(","), mode: m, rule, cipher: $("#cipher").value, saboteur: sab ?? "",
+                   langs: route.slice(0, chain.length - 1).join(",") };
   try {
     const res = await fetch("/run?" + new URLSearchParams(params));
     const reader = res.body.getReader(), dec = new TextDecoder();
@@ -593,6 +660,7 @@ $("#form").onsubmit = ev => {
 function summary(r) {
   if (r.mode === "cipher") return `${CNAME[r.cipher] || r.cipher} · ${r.intact ? "intact" : "broke"} → ${r.answer}`;
   if (r.mode === "blind") return `${r.calls} answers`;
+  if (r.mode === "translate") return `${(r.langs || []).join(" → ")} · ${Math.round(r.match * 100)}% match → ${r.answer}`;
   const s = r.sabotage;
   return `→ ${r.answer}` + (s ? ` · saboteur ${{ caught: "caught", slipped: "slipped through", no_lie: "didn't lie" }[s.outcome]}` : "");
 }
@@ -623,12 +691,13 @@ async function openRun(id) {
   $("#task").value = r.task; $("#rule").value = r.rule || "";
   grow($("#task"), 260); grow($("#rule"), 120);
   if (r.cipher) $("#cipher").value = r.cipher;
+  if (r.langs) route = r.langs.slice(0, -1);
   saboteur = r.saboteur != null ? r.chain[r.saboteur] : null;
   const missing = r.chain.filter(n => !installed.some(m => m.name === n));
   if (missing.length) warn("Not installed any more: " + missing.join(", "));
   else chain = [...r.chain];
   setMode(r.mode);
-  renderStage(r.task, r.rule, r.chain, r.mode, r.saboteur ?? null);
+  renderStage(r.task, r.rule, r.chain, r.mode, r.saboteur ?? null, r.langs);
   if (r.mode === "cipher") handle({ type: "start", cipher: r.ciphers[0], sent: r.encoded });
   const honest = r.sabotage?.outcome === "no_lie";  // older runs didn't record "lied" per step
   r.trace.forEach(t => handle({ type: "step", ...t, ...(t.sabotage && t.lied === undefined ? { lied: !honest } : {}) }));
@@ -640,6 +709,7 @@ setMode("relay");
 fetch("/models").then(r => r.json()).then(d => {
   if (d.error) return warn(d.error);
   installed = d.models; ramGb = d.ram_gb || 0;
+  languages = d.languages || []; defaultRoute = d.route || [];
   chain = d.default.filter(n => installed.some(m => m.name === n));
   if (!chain.length && installed.length) chain = [installed[0].name];
   renderChain();

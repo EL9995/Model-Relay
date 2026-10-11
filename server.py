@@ -28,7 +28,8 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 models = [{"name": m["name"], "gb": round(m["size"] / 1e9, 1)}
                           for m in relay.post_get("/api/tags").get("models", [])]
-                body = {"models": models, "default": relay.DEFAULT_CHAIN.split(","), "ram_gb": RAM_GB}
+                body = {"models": models, "default": relay.DEFAULT_CHAIN.split(","), "ram_gb": RAM_GB,
+                        "languages": relay.LANGUAGES[:-1], "route": relay.DEFAULT_ROUTE}
             except OSError as e:
                 body = {"error": f"Can't reach Ollama at {relay.OLLAMA}. Is the app running? ({e})"}
             self.reply(200, "application/json", json.dumps(body).encode())
@@ -44,11 +45,12 @@ class Handler(BaseHTTPRequestHandler):
             sab = q.get("saboteur", "")
             self.run_relay(q["task"], [m for m in q.get("chain", "").split(",") if m],
                            q.get("mode", "relay"), q.get("rule", ""),
-                           int(sab) if sab.isdigit() else None, q.get("cipher", "base64"))
+                           int(sab) if sab.isdigit() else None, q.get("cipher", "base64"),
+                           [l for l in q.get("langs", "").split(",") if l])
         else:
             self.reply(404, "text/plain", b"not found")
 
-    def run_relay(self, task, chain, mode, rule, saboteur, cipher):
+    def run_relay(self, task, chain, mode, rule, saboteur, cipher, langs):
         """Stream relay events to the page as server-sent events, one per line pair."""
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
@@ -63,7 +65,7 @@ class Handler(BaseHTTPRequestHandler):
             if mode == "cipher" and cipher not in [*relay.CIPHERS, "mix"]:
                 raise ValueError(f"unknown cipher {cipher!r}")
             r = relay.run(task, chain or relay.DEFAULT_CHAIN.split(","), mode, rule, send,
-                          saboteur=saboteur, cipher_name=cipher)
+                          saboteur=saboteur, cipher_name=cipher, route=langs)
             send({"type": "done", **{k: v for k, v in r.items() if k != "trace"}})
         except (BrokenPipeError, ConnectionResetError):
             pass  # the page was closed mid-run

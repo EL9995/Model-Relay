@@ -13,10 +13,12 @@ Run:   python3 relay.py "2+2"
        python3 relay.py --rule "Answer in one word." "Capital of Japan?"
        python3 relay.py --saboteur 2 "Capital of Japan?"   (layer 2 plants a wrong answer)
        python3 relay.py --cipher mix "meet at noon"          (pass a secret message down)
+       python3 relay.py --translate Spanish,Japanese "Break a leg!"   (translation telephone)
 """
 
 import argparse
 import base64
+import difflib
 import json
 import re
 import sys
@@ -320,6 +322,66 @@ def cipher(task, chain, rule="", on_event=lambda e: None, name="base64"):
     return decoded, trace, extra
 
 
+# ---- translate mode ----
+
+LANGUAGES = ["Spanish", "Japanese", "French", "German", "Korean", "Portuguese", "Chinese", "Italian",
+             "Russian", "Arabic", "Hindi", "Dutch", "English"]
+DEFAULT_ROUTE = LANGUAGES[:-1]
+SCRIPTS = {  # languages whose writing system the tool can recognise
+    "Japanese": r"[぀-ヿ]",  # kana; Chinese has none
+    "Chinese": r"[一-鿿]",
+    "Korean": r"[가-힯]",
+    "Russian": r"[Ѐ-ӿ]",
+    "Arabic": r"[؀-ۿ]",
+    "Hindi": r"[ऀ-ॿ]",
+}
+TRANSLATE_PROMPT = (
+    "You are layer {n} of {total} in a relay chain of AI models playing a translation game. "
+    "Translate the text below from {src} into {dst}. Keep the meaning exactly. "
+    "Reply with only the translation, nothing else.\n\nText:\n{text}"
+)
+
+
+def looks_like(text, lang):
+    """False when the text is clearly in the wrong writing system for lang, else True.
+    It can't tell Spanish from French, only Latin letters from kana, Hangul and so on."""
+    letters = [c for c in text if c.isalpha()]
+    if not letters:
+        return False
+    if lang in SCRIPTS:
+        if lang == "Japanese":
+            return bool(re.search(SCRIPTS["Japanese"], text))
+        return sum(bool(re.match(SCRIPTS[lang], c)) for c in letters) / len(letters) > 0.5
+    return sum(c.isascii() or "À" <= c <= "ɏ" for c in letters) / len(letters) > 0.7
+
+
+def word_match(a, b):
+    """How much of the original wording survived, 0 to 1, by matching runs of words."""
+    words = lambda t: re.findall(r"\w+", t.lower())
+    return round(difflib.SequenceMatcher(None, words(a), words(b)).ratio(), 2)
+
+
+def translate(task, chain, rule="", on_event=lambda e: None, route=()):
+    """Telephone game: each layer translates the text into its language; the bottom
+    one always translates back to English, so the result can be compared with the task."""
+    snapshots.clear()
+    total = len(chain)
+    route = [r for r in route if r in LANGUAGES] or DEFAULT_ROUTE
+    langs = [route[i % len(route)] for i in range(total - 1)] + ["English"]
+    trace, text, src = [], task, "English"
+    for i, model in enumerate(chain):
+        on_event({"type": "call", "dir": "translate", "layer": i, "model": model, "lang": langs[i]})
+        out, secs, tps = ask(model, TRANSLATE_PROMPT.format(n=i + 1, total=total, src=src, dst=langs[i],
+                                                            text=text), "bottom", rule, BLIND_TOKENS)
+        text = out["answer"]
+        entry = {"dir": "translate", "layer": i, "model": model, "lang": langs[i], "from": src, "sent": text,
+                 "script_ok": looks_like(text, langs[i]), "secs": secs, "tok_s": tps, "cut": out["cut"]}
+        trace.append(entry)
+        on_event({"type": "step", **entry})
+        src = langs[i]
+    return text, trace, {"langs": langs, "match": word_match(task, text)}
+
+
 def blind(task, chain, rule="", on_event=lambda e: None):
     """Every model gets the original task word for word and answers on its own.
     No model sees another's answer. One model at a time, so it fits in memory."""
@@ -336,14 +398,17 @@ def blind(task, chain, rule="", on_event=lambda e: None):
 
 
 def run(task, chain, mode="relay", rule="", on_event=lambda e: None, save=True,
-        saboteur=None, cipher_name="base64"):
-    """Run one relay, blind or cipher pass and return its record, saved to runs/ unless save=False."""
+        saboteur=None, cipher_name="base64", route=()):
+    """Run one relay, blind, cipher or translate pass and return its record, saved to runs/
+    unless save=False."""
     start = time.time()
     settings = {}
     if mode == "blind":
         answer, trace, extra = None, blind(task, chain, rule, on_event), {}
     elif mode == "cipher":
         answer, trace, extra = cipher(task, chain, rule, on_event, cipher_name)
+    elif mode == "translate":
+        answer, trace, extra = translate(task, chain, rule, on_event, route)
     else:
         if saboteur is not None and not 0 <= saboteur < len(chain):
             raise ValueError(f"saboteur layer {saboteur + 1} isn't in a {len(chain)}-model chain")
@@ -385,7 +450,8 @@ def list_runs():
         except ValueError:
             continue
         runs.append({k: r.get(k) for k in ("id", "time", "mode", "task", "rule", "chain", "answer",
-                                           "secs", "calls", "cipher", "intact", "sabotage")})
+                                           "secs", "calls", "cipher", "intact", "sabotage",
+                                           "langs", "match")})
     return runs
 
 
@@ -398,21 +464,26 @@ def main():
                    help="every model answers the original task on its own; no relay")
     p.add_argument("--cipher", choices=[*CIPHERS, "mix"],
                    help="cipher mode: pass the task down as a secret message in this cipher")
+    p.add_argument("--translate", metavar="LANGS",
+                   help="translate mode: languages for each hop, e.g. Spanish,Japanese,French "
+                        "(the bottom model always translates back to English)")
     p.add_argument("--saboteur", type=int, metavar="LAYER",
                    help="relay mode: this layer (1 = top) secretly plants a wrong answer")
     p.add_argument("--rule", default="", help="a rule every model must follow (system prompt)")
     p.add_argument("--no-save", action="store_true", help="don't save this run to runs/")
     a = p.parse_args()
     chain = [m.strip() for m in a.chain.split(",") if m.strip()]
-    mode = "blind" if a.blind else "cipher" if a.cipher else "relay"
+    mode = "blind" if a.blind else "cipher" if a.cipher else "translate" if a.translate else "relay"
 
     r = run(a.task, chain, mode, a.rule, save=not a.no_save,
-            saboteur=a.saboteur - 1 if a.saboteur else None, cipher_name=a.cipher or "base64")
+            saboteur=a.saboteur - 1 if a.saboteur else None, cipher_name=a.cipher or "base64",
+            route=[l.strip().title() for l in (a.translate or "").split(",") if l.strip()])
     if a.json:
         print(json.dumps(r, indent=2, ensure_ascii=False))
         return
 
-    arrows = {"down": "↓", "answer": "●", "up": "↑", "solo": "●", "decode": "◇", "encode": "◆"}
+    arrows = {"down": "↓", "answer": "●", "up": "↑", "solo": "●", "decode": "◇", "encode": "◆",
+              "translate": "→"}
     print(f"TASK  {a.task}\n")
     if mode == "cipher":
         print(f"  tool encoded it ({r['ciphers'][0]}): {r['encoded']}\n")
@@ -422,6 +493,8 @@ def main():
             flag = "  (SABOTEUR)" if t.get("sabotage") else "  (corrected)" if t["changed"] else "  (ok)"
         elif t.get("sabotage"):
             flag = "  (SABOTEUR)"
+        if t["dir"] == "translate":
+            flag = f"  into {t['lang']}" + ("" if t["script_ok"] else " (doesn't look like it)") + flag
         if t["dir"] in ("decode", "encode"):
             flag = f"  {t['dir']} {t['cipher']} " + {True: "✓", False: "✗", None: "?"}[t["ok"]] + flag
         print(f"{arrows[t['dir']]} {t['model']:<16} {t['secs']:>5}s {t['tok_s']:>4} tok/s{flag}")
@@ -435,6 +508,9 @@ def main():
         b = r["broke_at"]
         print("CIPHER  message arrived intact" if r["intact"] else "CIPHER  message did not survive", end="")
         print(f"; first mistake: layer {b['layer'] + 1} ({b['model']}) {b['dir']} {b['cipher']}" if b else "")
+    if mode == "translate":
+        print(f"ROUTE   English → {' → '.join(r['langs'])}")
+        print(f"MATCH   {round(r['match'] * 100)}% of the original wording survived")
     if r.get("sabotage"):
         sb = r["sabotage"]
         what = {"no_lie": "didn't lie (gave the honest answer anyway)",
