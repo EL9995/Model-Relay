@@ -10,6 +10,18 @@ Frontier → 8–14B → 3–4B → 1B → (answer) → back up, checked at each
 
 The point is the plumbing and the limits, not solving problems.
 
+## Modes
+
+- **Relay**: each layer rewrites the task for the model below, the bottom one answers, and each
+  layer checks the answer on the way back up. **Saboteur** (chaos option) makes one layer secretly
+  plant a believable wrong answer; the run records whether a layer above caught it.
+- **Blind**: every model gets the prompt word for word and answers on its own.
+- **Cipher**: a secret message goes down the chain. Each layer decodes it and re-encodes it for the
+  next (base64, ROT13, Caesar +3, reverse, or a different one each hop). The tool knows the ciphers,
+  so every step is checked exactly and the run shows where the message first broke.
+
+The chain can be in any order (drag the models on the page, or `--chain`), including smallest on top.
+
 ## Run
 
 Needs the Ollama app running and the models pulled. No Python packages.
@@ -20,6 +32,8 @@ python3 relay.py --chain gemma4:12b,gemma3:4b,gemma3:1b "2+2"
 python3 relay.py --json "2+2"
 python3 relay.py --blind "How many r's are in strawberry?"   # every model answers on its own
 python3 relay.py --rule "Answer with just the number." "2+2"  # a rule every model must follow
+python3 relay.py --saboteur 4 "What is 7 times 8?"           # layer 4 plants a wrong answer
+python3 relay.py --cipher mix "meet at noon"                  # pass a secret message down
 ```
 
 To watch it run, start the web page and open http://localhost:8765:
@@ -40,3 +54,8 @@ The page's **Saved runs** list opens any of them again. Add `--no-save` to skip 
 - Forcing JSON output on `gemma3:1b` sent it into a loop; the bottom layer replies in plain
   text, and every reply is capped at 200 tokens.
 - `gemma4:e2b` / `e4b` are 7.5 / 9.5 GB on disk, so they're not light layers.
+- Caesar cipher: no model could encode or decode it. base64: only the granite models decoded it;
+  the gemma models made up plausible phrases ("hello world"). In a mixed-cipher relay
+  "meet at noon" arrived at the bottom as "hello", first broken by granite4.2:8b's ROT13.
+- Saboteur at the bottom of "What is 7 times 8?" planted "15". granite4.2:3b approved it;
+  gemma3:4b, one layer up, caught it and restored 56.

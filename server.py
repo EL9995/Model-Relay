@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Local web page for the relay: type a task, watch it travel down the chain and back up.
+Also runs blind mode (every model answers alone) and cipher mode (a secret message is passed down).
 
 Run:   python3 server.py        then open http://localhost:8765
 """
@@ -38,12 +39,14 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self.reply(404, "text/plain", b"no such run")
         elif url.path == "/run" and q.get("task"):
+            sab = q.get("saboteur", "")
             self.run_relay(q["task"], [m for m in q.get("chain", "").split(",") if m],
-                           q.get("mode", "relay"), q.get("rule", ""))
+                           q.get("mode", "relay"), q.get("rule", ""),
+                           int(sab) if sab.isdigit() else None, q.get("cipher", "base64"))
         else:
             self.reply(404, "text/plain", b"not found")
 
-    def run_relay(self, task, chain, mode, rule):
+    def run_relay(self, task, chain, mode, rule, saboteur, cipher):
         """Stream relay events to the page as server-sent events, one per line pair."""
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
@@ -55,7 +58,10 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.flush()
 
         try:
-            r = relay.run(task, chain or relay.DEFAULT_CHAIN.split(","), mode, rule, send)
+            if mode == "cipher" and cipher not in [*relay.CIPHERS, "mix"]:
+                raise ValueError(f"unknown cipher {cipher!r}")
+            r = relay.run(task, chain or relay.DEFAULT_CHAIN.split(","), mode, rule, send,
+                          saboteur=saboteur, cipher_name=cipher)
             send({"type": "done", **{k: v for k, v in r.items() if k != "trace"}})
         except (BrokenPipeError, ConnectionResetError):
             pass  # the page was closed mid-run

@@ -8,14 +8,14 @@
   :root {
     --bg: #f6f5f1; --surface: #ffffff; --ink: #1d1d1b; --muted: #6b6a64; --line: #e2e0d8;
     --accent: #2f6fdb; --accent-soft: #e6eefc; --up: #1f8a5b; --up-soft: #e3f4ec;
-    --warn: #b7600b; --warn-soft: #fbeedd; --err: #c0392b;
+    --warn: #b7600b; --warn-soft: #fbeedd; --bad: #c0392b; --bad-soft: #fbe5e2;
     --mono: ui-monospace, "SF Mono", Menlo, monospace;
   }
   @media (prefers-color-scheme: dark) {
     :root {
       --bg: #141414; --surface: #1e1e1d; --ink: #ecebe6; --muted: #9a998f; --line: #34332f;
       --accent: #6c9cf0; --accent-soft: #1d2a40; --up: #4cc08a; --up-soft: #16302a;
-      --warn: #e59a4a; --warn-soft: #3a2a17; --err: #ef6b5b;
+      --warn: #e59a4a; --warn-soft: #3a2a17; --bad: #ef6b5b; --bad-soft: #3d1d1a;
     }
   }
   * { box-sizing: border-box; }
@@ -32,23 +32,38 @@
   button { font: inherit; font-weight: 600; padding: 10px 18px; border: 0; border-radius: 8px;
            background: var(--accent); color: #fff; cursor: pointer; }
   button:disabled { opacity: .5; cursor: default; }
-  .chain { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 12px;
-           font-size: 13px; color: var(--muted); }
-  .chip { font-family: var(--mono); font-size: 12px; background: var(--bg); border: 1px solid var(--line);
-          border-radius: 999px; padding: 3px 4px 3px 10px; color: var(--ink); display: inline-flex; gap: 4px; }
-  .chip button { background: none; color: var(--muted); padding: 0 6px; font-weight: 400; }
-  .chain select { font: inherit; font-size: 12px; padding: 3px 6px; border-radius: 6px;
-                  border: 1px solid var(--line); background: var(--surface); color: var(--ink); }
+  button.ghost { background: none; color: var(--muted); border: 1px solid var(--line);
+                 padding: 3px 10px; font-size: 12px; font-weight: 500; }
+  button.ghost:hover { color: var(--ink); }
+  select { font: inherit; font-size: 13px; padding: 4px 8px; border-radius: 6px;
+           border: 1px solid var(--line); background: var(--surface); color: var(--ink); }
 
-  .opts { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 12px; }
+  .opts { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 12px; font-size: 13px; }
+  .opts[hidden] { display: none; }
+  .opts > label { color: var(--muted); display: inline-flex; align-items: center; gap: 8px; }
   .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
-  .seg label { padding: 5px 14px; font-size: 13px; font-weight: 600; cursor: pointer; color: var(--muted); }
+  .seg label { padding: 5px 14px; font-weight: 600; cursor: pointer; color: var(--muted); }
   .seg input { position: absolute; opacity: 0; pointer-events: none; }
   .seg label:has(input:checked) { background: var(--accent); color: #fff; }
   .seg label:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: -2px; }
-  .hint { font-size: 13px; color: var(--muted); flex: 1; min-width: 200px; }
+  .hint { color: var(--muted); flex: 1; min-width: 200px; }
   .rule { width: 100%; margin-top: 10px; font: inherit; font-size: 14px; padding: 8px 12px; border-radius: 8px;
           border: 1px dashed var(--line); background: var(--bg); color: var(--ink); }
+
+  .chainbox { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+  .chainhead { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+  .chainhead span { flex: 1; min-width: 180px; }
+  .chain { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
+  .chip { font-family: var(--mono); font-size: 12px; background: var(--bg); border: 1px solid var(--line);
+          border-radius: 999px; padding: 3px 4px 3px 6px; color: var(--ink); display: inline-flex;
+          align-items: center; gap: 4px; cursor: grab; user-select: none; touch-action: none; }
+  .chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .chip .grip { color: var(--muted); letter-spacing: -2px; padding-right: 2px; }
+  .chip .num { color: var(--muted); }
+  .chip button { background: none; color: var(--muted); padding: 0 6px; font-weight: 400; }
+  .chip.dragging { opacity: .4; }
+  .chip.over { border-color: var(--accent); box-shadow: -3px 0 0 var(--accent); }
+
   .history { margin-top: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
   .history summary { padding: 10px 16px; cursor: pointer; font-weight: 600; font-size: 14px; }
   .history summary span { color: var(--muted); font-weight: 400; }
@@ -62,8 +77,10 @@
   .history .a { color: var(--muted); font-size: 12px; grid-column: 2 / 4; overflow: hidden;
           text-overflow: ellipsis; white-space: nowrap; }
   .tag { font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 999px;
-         background: var(--accent-soft); color: var(--accent); }
+         background: var(--accent-soft); color: var(--accent); align-self: center; }
   .tag.blind { background: var(--up-soft); color: var(--up); }
+  .tag.cipher { background: var(--warn-soft); color: var(--warn); }
+  .tag.sab { background: var(--bad-soft); color: var(--bad); }
   .empty { color: var(--muted); font-size: 13px; padding: 4px 8px 8px; }
   .banner { margin-top: 16px; padding: 10px 14px; border-radius: 8px; background: var(--warn-soft);
             color: var(--warn); display: none; }
@@ -72,28 +89,35 @@
   #stage { margin-top: 28px; }
   .node { background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
           padding: 12px 16px; transition: border-color .2s, box-shadow .2s; }
+  .node.sab { border-color: var(--bad); }
   .node.active { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .node.sab.active { border-color: var(--bad); box-shadow: 0 0 0 3px var(--bad-soft); }
   .head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
   .layer { font-size: 12px; color: var(--muted); }
   .model { font-family: var(--mono); font-weight: 600; }
   .role { font-size: 12px; color: var(--muted); }
   .status { margin-left: auto; font-size: 12px; color: var(--muted); }
   .node.active .status { color: var(--accent); }
+  .node.sab.active .status { color: var(--bad); }
   .node.active .status::before { content: ""; display: inline-block; width: 7px; height: 7px;
-          border-radius: 50%; background: var(--accent); margin-right: 6px; animation: blink 1s infinite; }
+          border-radius: 50%; background: currentColor; margin-right: 6px; animation: blink 1s infinite; }
   .msg { margin-top: 10px; padding: 8px 12px; border-radius: 8px; display: none; }
   .msg.show { display: block; animation: pop .25s ease-out; }
   .msg .lbl { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em;
-              display: flex; gap: 8px; }
-  .msg .lbl span:last-child { margin-left: auto; font-weight: 400; text-transform: none;
+              display: flex; flex-wrap: wrap; gap: 8px; }
+  .msg .lbl span:last-child:not(:first-child) { margin-left: auto; font-weight: 400; text-transform: none;
               letter-spacing: 0; font-family: var(--mono); }
   .msg .txt { white-space: pre-wrap; word-break: break-word; }
+  .msg .txt.code { font-family: var(--mono); font-size: 14px; }
   .msg.down { background: var(--accent-soft); } .msg.down .lbl { color: var(--accent); }
   .msg.up { background: var(--up-soft); } .msg.up .lbl { color: var(--up); }
-  .msg.up.fixed { background: var(--warn-soft); } .msg.up.fixed .lbl { color: var(--warn); }
+  .msg.fixed { background: var(--warn-soft); } .msg.fixed .lbl { color: var(--warn); }
+  .msg.bad { background: var(--bad-soft); } .msg.bad .lbl { color: var(--bad); }
   .note { font-size: 13px; color: var(--muted); margin-top: 4px; }
   .you .txt { font-size: 17px; }
   .final { font-size: 20px; font-weight: 600; }
+  .verdict { font-weight: 600; margin-top: 6px; }
+  .verdict.good { color: var(--up); } .verdict.bad { color: var(--bad); }
   .stats { font-size: 13px; color: var(--muted); margin-top: 6px; }
 
   .wire { position: relative; height: 40px; margin-left: 32px; width: 2px; background: var(--line); }
@@ -118,19 +142,41 @@
 
   <form id="form">
     <div class="ask">
-      <input id="task" placeholder="Ask something… e.g. How many r's are in strawberry?" autocomplete="off">
+      <input id="task" autocomplete="off">
       <button id="go">Run</button>
     </div>
     <div class="opts">
       <div class="seg" role="radiogroup" aria-label="Mode">
         <label><input type="radio" name="mode" value="relay" checked>Relay</label>
         <label><input type="radio" name="mode" value="blind">Blind</label>
+        <label><input type="radio" name="mode" value="cipher">Cipher</label>
       </div>
       <span class="hint" id="hint"></span>
     </div>
+    <div class="opts" id="relayOpts">
+      <label>Chaos <select id="saboteur"></select></label>
+    </div>
+    <div class="opts" id="cipherOpts" hidden>
+      <label>Cipher
+        <select id="cipher">
+          <option value="base64">base64</option>
+          <option value="rot13">ROT13</option>
+          <option value="caesar">Caesar +3</option>
+          <option value="reverse">Reverse</option>
+          <option value="mix">Mix: a different cipher each hop</option>
+        </select>
+      </label>
+    </div>
     <input id="rule" class="rule" autocomplete="off"
            placeholder="Rule every model must follow (optional), e.g. Answer in one sentence.">
-    <div class="chain" id="chain"></div>
+    <div class="chainbox">
+      <div class="chainhead">
+        <span>Chain, top to bottom. Drag to reorder (or focus one and use the arrow keys).</span>
+        <button type="button" class="ghost" id="sortBig">Biggest first</button>
+        <button type="button" class="ghost" id="flip">Flip</button>
+      </div>
+      <div class="chain" id="chain"></div>
+    </div>
   </form>
   <details class="history" id="history">
     <summary>Saved runs <span id="hcount"></span></summary>
@@ -149,28 +195,57 @@ const el = (tag, cls, text) => {
   if (text != null) e.textContent = text;
   return e;
 };
-let installed = [], chain = [], running = false;
+let installed = [], chain = [], running = false, openId = null;
 const gb = name => (installed.find(m => m.name === name) || {}).gb || 0;
-
-const HINTS = {
-  relay: "Each model rewrites the task for the smaller one below. The smallest answers; each layer checks it on the way back up.",
-  blind: "Every model gets your prompt word for word and answers on its own. None sees another's answer.",
-};
-const mode = () => document.querySelector("input[name=mode]:checked").value;
-document.querySelectorAll("input[name=mode]").forEach(r => r.onchange = () => $("#hint").textContent = HINTS[mode()]);
-$("#hint").textContent = HINTS.relay;
+const CNAME = { base64: "base64", rot13: "ROT13", caesar: "Caesar +3", reverse: "reverse", mix: "mix" };
 
 function warn(text) { $("#banner").textContent = text; $("#banner").classList.toggle("show", !!text); }
 
-// ---- chain picker: always ordered biggest first ----
+// ---- modes ----
+const MODES = {
+  relay: { hint: "Each model rewrites the task for the one below. The bottom one answers; each layer checks it on the way back up.",
+           placeholder: "Ask something… e.g. What is the capital of Japan?" },
+  blind: { hint: "Every model gets your prompt word for word and answers on its own. None sees another's answer.",
+           placeholder: "Ask something… e.g. How many r's are in strawberry?" },
+  cipher: { hint: "Your message is encoded and passed down. Each model decodes it and re-encodes it for the next. Every step is checked.",
+            placeholder: "A secret message… e.g. meet at noon" },
+};
+const mode = () => document.querySelector("input[name=mode]:checked").value;
+function setMode(m) {
+  document.querySelector(`input[name=mode][value=${m}]`).checked = true;
+  $("#hint").textContent = MODES[m].hint;
+  $("#task").placeholder = MODES[m].placeholder;
+  $("#relayOpts").hidden = m !== "relay";
+  $("#cipherOpts").hidden = m !== "cipher";
+}
+document.querySelectorAll("input[name=mode]").forEach(r => r.onchange = () => setMode(mode()));
+setMode("relay");
+
+// ---- chain: any order, drag to rearrange (pointer events, so mouse and touch both work) ----
+function move(from, to) {
+  if (to < 0 || to >= chain.length || from === to) return false;
+  const [m] = chain.splice(from, 1); chain.splice(to, 0, m);
+  renderChain();
+  return true;
+}
 function renderChain() {
-  chain.sort((a, b) => gb(b) - gb(a));
-  const box = $("#chain"); box.replaceChildren(el("span", null, "Chain, biggest first:"));
-  chain.forEach(name => {
-    const chip = el("span", "chip", `${name} · ${gb(name)} GB`);
-    const x = el("button", null, "×"); x.type = "button"; x.title = "Remove";
-    x.onclick = () => { chain = chain.filter(n => n !== name); renderChain(); };
-    if (chain.length > 1) chip.append(x);
+  const box = $("#chain"); box.replaceChildren();
+  chain.forEach((name, i) => {
+    const chip = el("span", "chip");
+    chip.tabIndex = 0; chip.dataset.i = i;
+    chip.setAttribute("aria-label", `Layer ${i + 1}: ${name}. Arrow keys move it, Delete removes it.`);
+    chip.append(el("span", "grip", "⋮⋮"), el("span", "num", `${i + 1}`), el("span", null, `${name} · ${gb(name)} GB`));
+    if (chain.length > 1) {
+      const x = el("button", null, "×"); x.type = "button"; x.title = "Remove"; x.tabIndex = -1;
+      x.onclick = () => { chain.splice(i, 1); renderChain(); };
+      chip.append(x);
+    }
+    chip.onpointerdown = e => drag(e, chip, i);
+    chip.onkeydown = e => {
+      const d = { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 }[e.key];
+      if (d) { e.preventDefault(); if (move(i, i + d)) $("#chain").children[i + d].focus(); }
+      if ((e.key === "Delete" || e.key === "Backspace") && chain.length > 1) { chain.splice(i, 1); renderChain(); }
+    };
     box.append(chip);
   });
   const rest = installed.filter(m => !chain.includes(m.name));
@@ -180,29 +255,67 @@ function renderChain() {
     sel.onchange = () => { chain.push(sel.value); renderChain(); };
     box.append(sel);
   }
+  renderSaboteur();
+}
+function drag(e, chip, from) {
+  if (e.button !== 0 || e.target.closest("button")) return;
+  const x0 = e.clientX, y0 = e.clientY;
+  let target = null, moved = false;
+  chip.setPointerCapture(e.pointerId);
+  const over = ev => {
+    if (!moved && Math.hypot(ev.clientX - x0, ev.clientY - y0) < 4) return;  // still a click
+    moved = true; chip.classList.add("dragging");
+    const hit = document.elementFromPoint(ev.clientX, ev.clientY)?.closest(".chip");
+    document.querySelectorAll(".chip.over").forEach(c => c.classList.remove("over"));
+    target = hit && hit !== chip ? Number(hit.dataset.i) : null;
+    if (target != null) hit.classList.add("over");
+  };
+  const up = () => {
+    chip.removeEventListener("pointermove", over);
+    chip.classList.remove("dragging");
+    document.querySelectorAll(".chip.over").forEach(c => c.classList.remove("over"));
+    if (target != null) move(from, target);
+  };
+  chip.addEventListener("pointermove", over);
+  chip.addEventListener("pointerup", up, { once: true });
+  chip.addEventListener("pointercancel", up, { once: true });
+}
+$("#sortBig").onclick = () => { chain.sort((a, b) => gb(b) - gb(a)); renderChain(); };
+$("#flip").onclick = () => { chain.reverse(); renderChain(); };
+
+function renderSaboteur(pick) {
+  const sel = $("#saboteur"), keep = pick !== undefined ? String(pick) : sel.value;
+  const none = el("option", null, "None"); none.value = "";
+  sel.replaceChildren(none);
+  chain.forEach((name, i) => {
+    const o = el("option", null, `Saboteur at layer ${i + 1} · ${name}`); o.value = String(i); sel.append(o);
+  });
+  sel.value = keep !== "" && Number(keep) < chain.length ? keep : "";
 }
 
 // ---- the stage: You at the top, one card per model, a wire above each card ----
-let nodes = [], wires = [], you;
-function renderStage(task, rule, runChain = chain, runMode = mode()) {
-  const blindMode = runMode === "blind";
-  const stage = $("#stage"); stage.replaceChildren(); nodes = []; wires = [];
+let nodes = [], wires = [], you, planted = null;
+function renderStage(task, rule, runChain, runMode, saboteur) {
+  const stage = $("#stage"); stage.replaceChildren(); nodes = []; wires = []; planted = null;
   you = el("div", "node you");
   const h = el("div", "head"); h.append(el("span", "model", "You"), el("span", "status", ""));
-  const m = el("div", "msg down show"); m.append(lbl("Task"), el("div", "txt", task));
+  const m = el("div", "msg down show");
+  m.append(lbl(runMode === "cipher" ? "Secret message" : "Task"), el("div", "txt", task));
   you.append(h, m);
   if (rule) { const r = el("div", "msg down show"); r.append(lbl("Rule for every model"), el("div", "txt", rule)); you.append(r); }
-  you.answer = el("div", "msg up");
-  you.append(you.answer);
+  you.enc = el("div", "msg down"); you.answer = el("div", "msg up");
+  you.append(you.enc, you.answer);
   stage.append(you);
 
   runChain.forEach((name, i) => {
     const w = el("div", "wire"); w.append(el("i")); wires.push(w); stage.append(w);
     const bottom = i === runChain.length - 1;
+    const role = { relay: bottom ? "answers" : "rewrites ↓ · checks ↑", blind: "answers on its own",
+                   cipher: bottom ? "decodes" : "decodes · re-encodes ↓" }[runMode];
     const n = el("div", "node");
     const head = el("div", "head");
-    head.append(el("span", "layer", `Layer ${i + 1}`), el("span", "model", name),
-                el("span", "role", blindMode ? "answers on its own" : bottom ? "answers" : "rewrites ↓ · checks ↑"));
+    head.append(el("span", "layer", `Layer ${i + 1}`), el("span", "model", name), el("span", "role", role));
+    if (saboteur === i) { n.classList.add("sab"); head.append(el("span", "tag sab", "saboteur")); }
     n.status = el("span", "status", "waiting"); head.append(n.status);
     n.down = el("div", "msg down"); n.up = el("div", "msg up");
     n.append(head, n.down, n.up);
@@ -215,64 +328,119 @@ function lbl(text, meta) {
   if (meta) l.append(el("span", null, meta));
   return l;
 }
-function fill(box, label, meta, text, note) {
-  box.replaceChildren(lbl(label, meta), el("div", "txt", text));
-  if (note) box.append(el("div", "note", note));
+function fill(box, label, meta, text, opts = {}) {
+  box.replaceChildren(lbl(label, meta), el("div", "txt" + (opts.code ? " code" : ""), text));
+  (opts.notes || []).filter(Boolean).forEach(nt => box.append(el("div", "note", nt)));
+  box.classList.remove("bad", "fixed");
+  if (opts.tone) box.classList.add(opts.tone);
   box.classList.add("show");
 }
-function flow(i, dir) { wires.forEach(w => w.className = "wire"); if (dir) wires[i].classList.add(dir); }
+function flow(i, dir) { wires.forEach(w => w.className = "wire"); if (dir && wires[i]) wires[i].classList.add(dir); }
 function busy(i, text) {
   nodes.forEach(n => n.classList.remove("active"));
   if (i == null) return;
   nodes[i].classList.add("active"); nodes[i].status.textContent = text;
   nodes[i].scrollIntoView({ block: "nearest", behavior: "smooth" });
 }
+const mark = ok => ok === true ? "✓" : ok === false ? "✗" : "?";
 
 function handle(e) {
   const n = nodes[e.layer];
-  if (e.type === "call") {
+  if (e.type === "start") {
+    fill(you.enc, `Encoded by the tool · ${CNAME[e.cipher]}`, null, e.sent, { code: true });
+  } else if (e.type === "call") {
     if (e.dir === "down") { flow(e.layer, "down"); busy(e.layer, "rewriting the task…"); }
-    if (e.dir === "answer") { flow(e.layer, "down"); busy(e.layer, "answering…"); }
-    if (e.dir === "up") { flow(e.layer + 1, "up"); busy(e.layer, "checking the answer…"); }
+    if (e.dir === "answer") { flow(e.layer, "down"); busy(e.layer, n.classList.contains("sab") ? "plotting…" : "answering…"); }
+    if (e.dir === "up") { flow(e.layer + 1, "up"); busy(e.layer, n.classList.contains("sab") ? "plotting…" : "checking the answer…"); }
     if (e.dir === "solo") { flow(e.layer, "down"); busy(e.layer, "answering…"); }
+    if (e.dir === "decode") { flow(e.layer, "down"); busy(e.layer, "decoding…"); }
+    if (e.dir === "encode") { busy(e.layer, "encoding for the next model…"); }
   } else if (e.type === "step") {
     const meta = `${e.secs}s · ${e.tok_s} tok/s` + (e.cut ? " · cut off at the token limit" : "");
     if (e.dir === "down") { fill(n.down, "↓ told the model below", meta, e.sent); n.status.textContent = "waiting for the answer"; }
-    if (e.dir === "answer" || e.dir === "solo") { fill(n.down, "● answered", meta, e.sent); n.status.textContent = "done"; }
+    if (e.dir === "answer" || e.dir === "solo") {
+      if (e.sabotage) planted = e.sent;
+      fill(n.down, e.sabotage ? "● planted a wrong answer" : "● answered", meta, e.sent, { tone: e.sabotage && "bad" });
+      n.status.textContent = e.sabotage ? "planted" : "done";
+    }
     if (e.dir === "up") {
-      fill(n.up, e.changed ? "↑ corrected it" : "↑ passed it up", meta, e.sent, e.note);
-      n.up.classList.toggle("fixed", !!e.changed);
-      n.status.textContent = e.changed ? "corrected" : "approved";
+      if (e.sabotage) {
+        planted = e.sent;
+        fill(n.up, "↑ planted a wrong answer", meta, e.sent, { tone: "bad" });
+        n.status.textContent = "planted";
+      } else if (planted != null && !e.changed) {
+        fill(n.up, "↑ approved the planted answer", meta, e.sent, { tone: "bad", notes: [e.note] });
+        n.status.textContent = "fooled";
+      } else {
+        if (planted != null) planted = null;  // the planted answer is gone from here up
+        fill(n.up, e.changed ? "↑ changed it" : "↑ passed it up", meta, e.sent, { tone: e.changed && "fixed", notes: [e.note] });
+        n.status.textContent = e.changed ? "changed it" : "approved";
+      }
+    }
+    if (e.dir === "decode" || e.dir === "encode") {
+      const notes = [
+        e.ok === false && `Should be: ${e.want}`,
+        e.ok == null && `What it got isn't valid ${CNAME[e.cipher]}, so there's no right answer to check against.`,
+        e.extra && "Added commentary after the answer; only the first paragraph was kept.",
+      ];
+      const box = e.dir === "decode" ? n.down : n.up;
+      const label = e.dir === "decode" ? `◇ decoded ${CNAME[e.cipher]} ${mark(e.ok)}` : `◆ encoded as ${CNAME[e.cipher]} ${mark(e.ok)}`;
+      fill(box, label, meta, e.sent, { code: e.dir === "encode", notes, tone: e.ok === false && "bad" });
+      n.status.textContent = e.dir === "decode" ? `decoded ${mark(e.ok)}` : `encoded ${mark(e.ok)}`;
     }
     flow(null); busy(null);
-  } else if (e.type === "done" && e.mode === "blind") {
-    flow(null);
-    you.answer.replaceChildren(lbl("Done"), el("div", "stats",
-      `${e.calls} models answered in ${e.secs}s · at most ${e.peak.length} in memory at once · compare their answers below`),
-      saved(e));
-    you.answer.classList.add("show");
-    you.scrollIntoView({ block: "nearest", behavior: "smooth" });
   } else if (e.type === "done") {
-    flow(0, "up");
-    setTimeout(() => {
-      flow(null);
-      you.answer.replaceChildren(lbl("Final answer"), el("div", "final", e.answer),
-        el("div", "stats", `${e.secs}s · ${e.calls} model calls · at most ${e.peak.length} of ${e.chain.length} models in memory at once`),
-        saved(e));
-      you.answer.classList.add("show");
-      you.scrollIntoView({ block: "nearest", behavior: "smooth" });
-    }, 700);
+    finish(e);
   } else if (e.type === "error") {
     flow(null); busy(null); warn("Relay failed: " + e.message);
   }
 }
 
+function finish(e) {
+  const parts = [];
+  if (e.mode === "blind") {
+    parts.push(lbl("Done"), el("div", "stats",
+      `${e.calls} models answered in ${e.secs}s · at most ${e.peak.length} in memory at once · compare their answers below`));
+  } else if (e.mode === "cipher") {
+    const b = e.broke_at;
+    parts.push(lbl("Message at the bottom"), el("div", "final", e.answer || "(nothing)"),
+      el("div", "verdict " + (e.intact ? "good" : "bad"), e.intact ? "Arrived intact ✓" : "Didn't survive ✗"));
+    if (b) parts.push(el("div", "stats", `First mistake: layer ${b.layer + 1} (${b.model}) ${b.dir === "decode" ? "decoding" : "encoding"} ${CNAME[b.cipher]}` +
+                                          (e.intact ? ", but the message still made it" : "")));
+    parts.push(el("div", "stats", `${e.secs}s · ${e.calls} model calls · ciphers: ${e.ciphers.map(c => CNAME[c]).join(" → ")}`));
+  } else {
+    parts.push(lbl("Final answer"), el("div", "final", e.answer));
+    const s = e.sabotage;
+    if (s) {
+      const [text, tone] = {
+        caught: [`Saboteur caught ✓ by layer ${s.caught_by + 1} (${s.caught_by_model})` +
+                 (s.final_is_honest ? "" : ", but the final answer still differs from the honest one"), "good"],
+        slipped: [`Saboteur slipped through ✗ Nobody above layer ${s.layer + 1} changed "${s.planted}".`, "bad"],
+        no_lie: ["The saboteur didn't lie; it gave the honest answer anyway.", ""],
+      }[s.outcome];
+      parts.push(el("div", "verdict " + tone, text));
+      if (s.honest != null) parts.push(el("div", "stats", `Honest answer: ${s.honest} · planted: ${s.planted}`));
+    }
+    parts.push(el("div", "stats", `${e.secs}s · ${e.calls} model calls · at most ${e.peak.length} of ${e.chain.length} models in memory at once`));
+  }
+  parts.push(el("div", "stats", e.id ? `Saved ${e.time.replace("T", " ")} · runs/${e.id}.json` : "Not saved"));
+  const show = () => {
+    flow(null);
+    you.answer.replaceChildren(...parts); you.answer.classList.add("show");
+    you.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  };
+  if (e.mode === "relay") { flow(0, "up"); setTimeout(show, 700); } else show();
+}
+
 async function run(task) {
   running = true; $("#go").disabled = true; warn("");
-  const rule = $("#rule").value.trim();
-  renderStage(task, rule);
+  const rule = $("#rule").value.trim(), m = mode();
+  const sab = m === "relay" && $("#saboteur").value !== "" ? Number($("#saboteur").value) : null;
+  openId = null;
+  renderStage(task, rule, chain, m, sab);
+  const params = { task, chain: chain.join(","), mode: m, rule, cipher: $("#cipher").value, saboteur: sab ?? "" };
   try {
-    const res = await fetch("/run?" + new URLSearchParams({ task, chain: chain.join(","), mode: mode(), rule }));
+    const res = await fetch("/run?" + new URLSearchParams(params));
     const reader = res.body.getReader(), dec = new TextDecoder();
     let buf = "";
     for (;;) {
@@ -292,12 +460,19 @@ async function run(task) {
   loadHistory();
 }
 
-// ---- saved runs ----
-function saved(e) {
-  return el("div", "stats", e.id ? `Saved ${e.time.replace("T", " ")} · runs/${e.id}.json` : "Not saved");
-}
+$("#form").onsubmit = ev => {
+  ev.preventDefault();
+  const task = $("#task").value.trim();
+  if (task && !running) run(task);
+};
 
-let openId = null;
+// ---- saved runs ----
+function summary(r) {
+  if (r.mode === "cipher") return `${CNAME[r.cipher] || r.cipher} · ${r.intact ? "intact" : "broke"} → ${r.answer}`;
+  if (r.mode === "blind") return `${r.calls} answers`;
+  const s = r.sabotage;
+  return `→ ${r.answer}` + (s ? ` · saboteur ${{ caught: "caught", slipped: "slipped through", no_lie: "didn't lie" }[s.outcome]}` : "");
+}
 async function loadHistory() {
   let runs = [];
   try { runs = await (await fetch("/runs")).json(); } catch { return; }
@@ -307,11 +482,11 @@ async function loadHistory() {
   list.replaceChildren(...runs.map(r => {
     const b = el("button");
     b.className = r.id === openId ? "current" : "";
-    b.append(el("span", "tag" + (r.mode === "blind" ? " blind" : ""), r.mode),
+    const tag = r.sabotage ? ["sab", "saboteur"] : [r.mode === "relay" ? "" : r.mode, r.mode];
+    b.append(el("span", "tag " + tag[0], tag[1]),
              el("span", "q", r.task),
              el("span", "when", r.time.slice(5, 16).replace("T", " ")),
-             el("span", "a", (r.answer != null ? "→ " + r.answer : `${r.calls} answers`) +
-                             ` · ${r.chain.length} models · ${r.secs}s` + (r.rule ? ` · rule: ${r.rule}` : "")));
+             el("span", "a", summary(r) + ` · ${r.chain.length} models · ${r.secs}s` + (r.rule ? ` · rule: ${r.rule}` : "")));
     b.onclick = () => openRun(r.id);
     const li = el("li"); li.append(b); return li;
   }));
@@ -323,22 +498,18 @@ async function openRun(id) {
   openId = id; warn("");
   // put the run back in the form so Run repeats it
   $("#task").value = r.task; $("#rule").value = r.rule || "";
-  document.querySelector(`input[name=mode][value=${r.mode}]`).checked = true;
-  $("#hint").textContent = HINTS[r.mode];
+  setMode(r.mode);
+  if (r.cipher) $("#cipher").value = r.cipher;
   const missing = r.chain.filter(n => !installed.some(m => m.name === n));
   if (missing.length) warn("Not installed any more: " + missing.join(", "));
   else { chain = [...r.chain]; renderChain(); }
-  renderStage(r.task, r.rule, r.chain, r.mode);
+  renderSaboteur(r.saboteur ?? "");
+  renderStage(r.task, r.rule, r.chain, r.mode, r.saboteur ?? null);
+  if (r.mode === "cipher") handle({ type: "start", cipher: r.ciphers[0], sent: r.encoded });
   r.trace.forEach(t => handle({ type: "step", ...t }));
-  handle({ type: "done", ...r });
+  finish(r);
   loadHistory();
 }
-
-$("#form").onsubmit = ev => {
-  ev.preventDefault();
-  const task = $("#task").value.trim();
-  if (task && !running) run(task);
-};
 
 fetch("/models").then(r => r.json()).then(d => {
   if (d.error) return warn(d.error);
