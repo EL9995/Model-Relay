@@ -18,6 +18,14 @@ Needs the Ollama app running and the models pulled. No Python packages.
 python3 relay.py "2+2"
 python3 relay.py --chain gemma4:12b,gemma3:4b,gemma3:1b "2+2"
 python3 relay.py --json "2+2"
+python3 relay.py --blind "How many r's are in strawberry?"   # every model answers on its own
+python3 relay.py --rule "Answer with just the number." "2+2"  # a rule every model must follow
+```
+
+To watch it run, start the web page and open http://localhost:8765:
+
+```bash
+python3 server.py
 ```
 
 ## Findings so far (2026-10-10, M5 Air 16 GB)

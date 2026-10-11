@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Model Relay</title>
+<style>
+  :root {
+    --bg: #f6f5f1; --surface: #ffffff; --ink: #1d1d1b; --muted: #6b6a64; --line: #e2e0d8;
+    --accent: #2f6fdb; --accent-soft: #e6eefc; --up: #1f8a5b; --up-soft: #e3f4ec;
+    --warn: #b7600b; --warn-soft: #fbeedd; --err: #c0392b;
+    --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #141414; --surface: #1e1e1d; --ink: #ecebe6; --muted: #9a998f; --line: #34332f;
+      --accent: #6c9cf0; --accent-soft: #1d2a40; --up: #4cc08a; --up-soft: #16302a;
+      --warn: #e59a4a; --warn-soft: #3a2a17; --err: #ef6b5b;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 32px 16px 80px; }
+  h1 { font-size: 22px; margin: 0 0 4px; letter-spacing: -0.01em; }
+  .sub { color: var(--muted); margin: 0 0 24px; }
+
+  form { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+  .ask { display: flex; gap: 8px; }
+  .ask input { flex: 1; min-width: 0; font: inherit; padding: 10px 12px; border-radius: 8px;
+               border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
+  button { font: inherit; font-weight: 600; padding: 10px 18px; border: 0; border-radius: 8px;
+           background: var(--accent); color: #fff; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  .chain { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 12px;
+           font-size: 13px; color: var(--muted); }
+  .chip { font-family: var(--mono); font-size: 12px; background: var(--bg); border: 1px solid var(--line);
+          border-radius: 999px; padding: 3px 4px 3px 10px; color: var(--ink); display: inline-flex; gap: 4px; }
+  .chip button { background: none; color: var(--muted); padding: 0 6px; font-weight: 400; }
+  .chain select { font: inherit; font-size: 12px; padding: 3px 6px; border-radius: 6px;
+                  border: 1px solid var(--line); background: var(--surface); color: var(--ink); }
+
+  .opts { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 12px; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .seg label { padding: 5px 14px; font-size: 13px; font-weight: 600; cursor: pointer; color: var(--muted); }
+  .seg input { position: absolute; opacity: 0; pointer-events: none; }
+  .seg label:has(input:checked) { background: var(--accent); color: #fff; }
+  .seg label:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .hint { font-size: 13px; color: var(--muted); flex: 1; min-width: 200px; }
+  .rule { width: 100%; margin-top: 10px; font: inherit; font-size: 14px; padding: 8px 12px; border-radius: 8px;
+          border: 1px dashed var(--line); background: var(--bg); color: var(--ink); }
+  .banner { margin-top: 16px; padding: 10px 14px; border-radius: 8px; background: var(--warn-soft);
+            color: var(--warn); display: none; }
+  .banner.show { display: block; }
+
+  #stage { margin-top: 28px; }
+  .node { background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+          padding: 12px 16px; transition: border-color .2s, box-shadow .2s; }
+  .node.active { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .layer { font-size: 12px; color: var(--muted); }
+  .model { font-family: var(--mono); font-weight: 600; }
+  .role { font-size: 12px; color: var(--muted); }
+  .status { margin-left: auto; font-size: 12px; color: var(--muted); }
+  .node.active .status { color: var(--accent); }
+  .node.active .status::before { content: ""; display: inline-block; width: 7px; height: 7px;
+          border-radius: 50%; background: var(--accent); margin-right: 6px; animation: blink 1s infinite; }
+  .msg { margin-top: 10px; padding: 8px 12px; border-radius: 8px; display: none; }
+  .msg.show { display: block; animation: pop .25s ease-out; }
+  .msg .lbl { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em;
+              display: flex; gap: 8px; }
+  .msg .lbl span:last-child { margin-left: auto; font-weight: 400; text-transform: none;
+              letter-spacing: 0; font-family: var(--mono); }
+  .msg .txt { white-space: pre-wrap; word-break: break-word; }
+  .msg.down { background: var(--accent-soft); } .msg.down .lbl { color: var(--accent); }
+  .msg.up { background: var(--up-soft); } .msg.up .lbl { color: var(--up); }
+  .msg.up.fixed { background: var(--warn-soft); } .msg.up.fixed .lbl { color: var(--warn); }
+  .note { font-size: 13px; color: var(--muted); margin-top: 4px; }
+  .you .txt { font-size: 17px; }
+  .final { font-size: 20px; font-weight: 600; }
+  .stats { font-size: 13px; color: var(--muted); margin-top: 6px; }
+
+  .wire { position: relative; height: 40px; margin-left: 32px; width: 2px; background: var(--line); }
+  .wire i { position: absolute; left: -4px; width: 10px; height: 10px; border-radius: 50%;
+            opacity: 0; top: 0; }
+  .wire.down i { background: var(--accent); opacity: 1; animation: down .9s linear infinite; }
+  .wire.up i { background: var(--up); opacity: 1; animation: up .9s linear infinite; }
+  @keyframes down { from { top: -5px; } to { top: 35px; } }
+  @keyframes up { from { top: 35px; } to { top: -5px; } }
+  @keyframes blink { 50% { opacity: .2; } }
+  @keyframes pop { from { opacity: 0; transform: translateY(-4px); } }
+  @media (prefers-reduced-motion: reduce) {
+    .wire i, .node.active .status::before, .msg.show { animation: none; }
+    .wire.down i, .wire.up i { top: 15px; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>Model Relay</h1>
+  <p class="sub">Send one prompt through every model you have installed and watch what each one does with it.</p>
+
+  <form id="form">
+    <div class="ask">
+      <input id="task" placeholder="Ask something… e.g. How many r's are in strawberry?" autocomplete="off">
+      <button id="go">Run</button>
+    </div>
+    <div class="opts">
+      <div class="seg" role="radiogroup" aria-label="Mode">
+        <label><input type="radio" name="mode" value="relay" checked>Relay</label>
+        <label><input type="radio" name="mode" value="blind">Blind</label>
+      </div>
+      <span class="hint" id="hint"></span>
+    </div>
+    <input id="rule" class="rule" autocomplete="off"
+           placeholder="Rule every model must follow (optional), e.g. Answer in one sentence.">
+    <div class="chain" id="chain"></div>
+  </form>
+  <div class="banner" id="banner"></div>
+
+  <div id="stage"></div>
+</main>
+
+<script>
+const $ = s => document.querySelector(s);
+const el = (tag, cls, text) => {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text != null) e.textContent = text;
+  return e;
+};
+let installed = [], chain = [], running = false;
+const gb = name => (installed.find(m => m.name === name) || {}).gb || 0;
+
+const HINTS = {
+  relay: "Each model rewrites the task for the smaller one below. The smallest answers; each layer checks it on the way back up.",
+  blind: "Every model gets your prompt word for word and answers on its own. None sees another's answer.",
+};
+const mode = () => document.querySelector("input[name=mode]:checked").value;
+document.querySelectorAll("input[name=mode]").forEach(r => r.onchange = () => $("#hint").textContent = HINTS[mode()]);
+$("#hint").textContent = HINTS.relay;
+
+function warn(text) { $("#banner").textContent = text; $("#banner").classList.toggle("show", !!text); }
+
+// ---- chain picker: always ordered biggest first ----
+function renderChain() {
+  chain.sort((a, b) => gb(b) - gb(a));
+  const box = $("#chain"); box.replaceChildren(el("span", null, "Chain, biggest first:"));
+  chain.forEach(name => {
+    const chip = el("span", "chip", `${name} · ${gb(name)} GB`);
+    const x = el("button", null, "×"); x.type = "button"; x.title = "Remove";
+    x.onclick = () => { chain = chain.filter(n => n !== name); renderChain(); };
+    if (chain.length > 1) chip.append(x);
+    box.append(chip);
+  });
+  const rest = installed.filter(m => !chain.includes(m.name));
+  if (rest.length) {
+    const sel = el("select"); sel.append(el("option", null, "+ add model"));
+    rest.forEach(m => { const o = el("option", null, `${m.name} · ${m.gb} GB`); o.value = m.name; sel.append(o); });
+    sel.onchange = () => { chain.push(sel.value); renderChain(); };
+    box.append(sel);
+  }
+}
+
+// ---- the stage: You at the top, one card per model, a wire above each card ----
+let nodes = [], wires = [], you;
+function renderStage(task, rule) {
+  const blindMode = mode() === "blind";
+  const stage = $("#stage"); stage.replaceChildren(); nodes = []; wires = [];
+  you = el("div", "node you");
+  const h = el("div", "head"); h.append(el("span", "model", "You"), el("span", "status", ""));
+  const m = el("div", "msg down show"); m.append(lbl("Task"), el("div", "txt", task));
+  you.append(h, m);
+  if (rule) { const r = el("div", "msg down show"); r.append(lbl("Rule for every model"), el("div", "txt", rule)); you.append(r); }
+  you.answer = el("div", "msg up");
+  you.append(you.answer);
+  stage.append(you);
+
+  chain.forEach((name, i) => {
+    const w = el("div", "wire"); w.append(el("i")); wires.push(w); stage.append(w);
+    const bottom = i === chain.length - 1;
+    const n = el("div", "node");
+    const head = el("div", "head");
+    head.append(el("span", "layer", `Layer ${i + 1}`), el("span", "model", name),
+                el("span", "role", blindMode ? "answers on its own" : bottom ? "answers" : "rewrites ↓ · checks ↑"));
+    n.status = el("span", "status", "waiting"); head.append(n.status);
+    n.down = el("div", "msg down"); n.up = el("div", "msg up");
+    n.append(head, n.down, n.up);
+    nodes.push(n); stage.append(n);
+  });
+}
+
+function lbl(text, meta) {
+  const l = el("div", "lbl"); l.append(el("span", null, text));
+  if (meta) l.append(el("span", null, meta));
+  return l;
+}
+function fill(box, label, meta, text, note) {
+  box.replaceChildren(lbl(label, meta), el("div", "txt", text));
+  if (note) box.append(el("div", "note", note));
+  box.classList.add("show");
+}
+function flow(i, dir) { wires.forEach(w => w.className = "wire"); if (dir) wires[i].classList.add(dir); }
+function busy(i, text) {
+  nodes.forEach(n => n.classList.remove("active"));
+  if (i == null) return;
+  nodes[i].classList.add("active"); nodes[i].status.textContent = text;
+  nodes[i].scrollIntoView({ block: "nearest", behavior: "smooth" });
+}
+
+function handle(e) {
+  const n = nodes[e.layer];
+  if (e.type === "call") {
+    if (e.dir === "down") { flow(e.layer, "down"); busy(e.layer, "rewriting the task…"); }
+    if (e.dir === "answer") { flow(e.layer, "down"); busy(e.layer, "answering…"); }
+    if (e.dir === "up") { flow(e.layer + 1, "up"); busy(e.layer, "checking the answer…"); }
+    if (e.dir === "solo") { flow(e.layer, "down"); busy(e.layer, "answering…"); }
+  } else if (e.type === "step") {
+    const meta = `${e.secs}s · ${e.tok_s} tok/s` + (e.cut ? " · cut off at the token limit" : "");
+    if (e.dir === "down") { fill(n.down, "↓ told the model below", meta, e.sent); n.status.textContent = "waiting for the answer"; }
+    if (e.dir === "answer" || e.dir === "solo") { fill(n.down, "● answered", meta, e.sent); n.status.textContent = "done"; }
+    if (e.dir === "up") {
+      fill(n.up, e.changed ? "↑ corrected it" : "↑ passed it up", meta, e.sent, e.note);
+      n.up.classList.toggle("fixed", !!e.changed);
+      n.status.textContent = e.changed ? "corrected" : "approved";
+    }
+    flow(null); busy(null);
+  } else if (e.type === "done" && e.mode === "blind") {
+    flow(null);
+    you.answer.replaceChildren(lbl("Done"), el("div", "stats",
+      `${e.calls} models answered in ${e.secs}s · at most ${e.peak.length} in memory at once · compare their answers below`));
+    you.answer.classList.add("show");
+    you.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  } else if (e.type === "done") {
+    flow(0, "up");
+    setTimeout(() => {
+      flow(null);
+      you.answer.replaceChildren(lbl("Final answer"), el("div", "final", e.answer),
+        el("div", "stats", `${e.secs}s · ${e.calls} model calls · at most ${e.peak.length} of ${chain.length} models in memory at once`));
+      you.answer.classList.add("show");
+      you.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }, 700);
+  } else if (e.type === "error") {
+    flow(null); busy(null); warn("Relay failed: " + e.message);
+  }
+}
+
+async function run(task) {
+  running = true; $("#go").disabled = true; warn("");
+  const rule = $("#rule").value.trim();
+  renderStage(task, rule);
+  try {
+    const res = await fetch("/run?" + new URLSearchParams({ task, chain: chain.join(","), mode: mode(), rule }));
+    const reader = res.body.getReader(), dec = new TextDecoder();
+    let buf = "";
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let k;
+      while ((k = buf.indexOf("\n\n")) >= 0) {
+        const chunk = buf.slice(0, k); buf = buf.slice(k + 2);
+        if (chunk.startsWith("data: ")) handle(JSON.parse(chunk.slice(6)));
+      }
+    }
+  } catch (err) {
+    warn("Lost the connection to server.py: " + err.message);
+  }
+  running = false; $("#go").disabled = false;
+}
+
+$("#form").onsubmit = ev => {
+  ev.preventDefault();
+  const task = $("#task").value.trim();
+  if (task && !running) run(task);
+};
+
+fetch("/models").then(r => r.json()).then(d => {
+  if (d.error) return warn(d.error);
+  installed = d.models;
+  chain = d.default.filter(n => installed.some(m => m.name === n));
+  if (!chain.length && installed.length) chain = [installed[0].name];
+  renderChain();
+}).catch(() => warn("Can't reach server.py. Start it with: python3 server.py"));
+</script>
+</body>
+</html>

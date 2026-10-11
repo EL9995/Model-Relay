@@ -9,6 +9,8 @@ checks the answer it got from below and either passes it on or corrects it.
 Run:   python3 relay.py "2+2"
        python3 relay.py --chain granite4.2:8b,gemma3:4b,gemma3:1b "2+2"
        python3 relay.py --json "2+2"     (full trace as JSON)
+       python3 relay.py --blind "2+2"    (every model answers on its own)
+       python3 relay.py --rule "Answer in one word." "Capital of Japan?"
 """
 
 import argparse
@@ -23,6 +25,7 @@ DEFAULT_CHAIN = "granite4.2:8b,gemma3:4b,granite4.2:3b,gemma3:1b"
 NUM_CTX = 2048      # small context keeps each model's memory down
 KEEP_ALIVE = "10m"  # keep every layer loaded so the way back up is fast
 MAX_TOKENS = 200    # stops a small model that gets stuck repeating itself
+BLIND_TOKENS = 512  # blind answers are the output itself, so give them more room
 
 DOWN_PROMPT = (
     "You are layer {n} of {total} in a relay chain of AI models. Your boss gave you a task. "
@@ -59,12 +62,15 @@ def post(path, body):
         return json.load(r)
 
 
-def ask(model, prompt, kind):
+def ask(model, prompt, kind, rule="", max_tokens=MAX_TOKENS):
     """One call to one model. The bottom model replies in plain text, because
-    forcing JSON on a 1B model sends it into loops; the others reply in JSON."""
+    forcing JSON on a 1B model sends it into loops; the others reply in JSON.
+    A rule, if given, goes in as the system prompt."""
     body = {"model": model, "prompt": prompt, "stream": False,
             "think": False, "keep_alive": KEEP_ALIVE,
-            "options": {"num_ctx": NUM_CTX, "temperature": 0, "num_predict": MAX_TOKENS}}
+            "options": {"num_ctx": NUM_CTX, "temperature": 0, "num_predict": max_tokens}}
+    if rule:
+        body["system"] = rule
     if kind != "bottom":
         body["format"] = SCHEMAS[kind]
     start = time.time()
@@ -80,6 +86,7 @@ def ask(model, prompt, kind):
         out = json.loads(r["response"]) if kind != "bottom" else {"answer": r["response"].strip()}
     except ValueError:
         out = {"answer": r["response"].strip(), "instruction": r["response"].strip()}
+    out["cut"] = r.get("done_reason") == "length"  # hit the token cap mid-answer
     toks = r.get("eval_count", 0)
     tps = toks / (r["eval_duration"] / 1e9) if r.get("eval_duration") else 0
     snapshots.append([n for n, _, _ in loaded()])
@@ -99,35 +106,62 @@ def post_get(path):
         return json.load(r)
 
 
-def relay(task, chain):
+def relay(task, chain, rule="", on_event=lambda e: None):
+    """on_event gets {"type": "call", ...} before each model call and
+    {"type": "step", ...} with the trace entry after it (used by server.py)."""
+    snapshots.clear()
     total = len(chain)
     trace, instructions = [], [task]
 
+    def call(layer, dir, model, prompt, kind):
+        on_event({"type": "call", "dir": dir, "layer": layer, "model": model})
+        return ask(model, prompt, kind, rule)
+
+    def step(layer, entry):
+        trace.append(entry)
+        on_event({"type": "step", "layer": layer, **entry})
+
     # Down: each layer simplifies the instruction it was given.
     for i, model in enumerate(chain[:-1]):
-        out, secs, tps = ask(model, DOWN_PROMPT.format(n=i + 1, total=total, task=instructions[-1]),
-                             "down")
+        out, secs, tps = call(i, "down", model,
+                              DOWN_PROMPT.format(n=i + 1, total=total, task=instructions[-1]), "down")
         instructions.append(out.get("instruction", "").strip() or instructions[-1])
-        trace.append({"dir": "down", "model": model, "sent": instructions[-1],
-                      "secs": secs, "tok_s": tps})
+        step(i, {"dir": "down", "model": model, "sent": instructions[-1], "secs": secs, "tok_s": tps})
 
     # Bottom: the smallest model does the work.
-    out, secs, tps = ask(chain[-1], BOTTOM_PROMPT.format(task=instructions[-1]), "bottom")
+    out, secs, tps = call(total - 1, "answer", chain[-1],
+                          BOTTOM_PROMPT.format(task=instructions[-1]), "bottom")
     answer = str(out.get("answer", "")).strip()
-    trace.append({"dir": "answer", "model": chain[-1], "sent": answer, "secs": secs, "tok_s": tps})
+    step(total - 1, {"dir": "answer", "model": chain[-1], "sent": answer, "secs": secs, "tok_s": tps,
+                     "cut": out["cut"]})
 
     # Up: each layer checks what came back against what it asked for.
     for i in range(total - 2, -1, -1):
-        out, secs, tps = ask(chain[i], UP_PROMPT.format(
+        out, secs, tps = call(i, "up", chain[i], UP_PROMPT.format(
             n=i + 1, total=total, instruction=instructions[i + 1],
             task=instructions[i], answer=answer), "up")
         new = str(out.get("answer", "")).strip() or answer
-        trace.append({"dir": "up", "model": chain[i], "sent": new, "secs": secs, "tok_s": tps,
-                      "correct": out.get("correct"), "changed": new != answer,
-                      "note": out.get("note", "")})
+        step(i, {"dir": "up", "model": chain[i], "sent": new, "secs": secs, "tok_s": tps,
+                 "correct": out.get("correct"), "changed": new != answer,
+                 "note": out.get("note", "")})
         answer = new
 
     return answer, trace
+
+
+def blind(task, chain, rule="", on_event=lambda e: None):
+    """Every model gets the original task word for word and answers on its own.
+    No model sees another's answer. One model at a time, so it fits in memory."""
+    snapshots.clear()
+    trace = []
+    for i, model in enumerate(chain):
+        on_event({"type": "call", "dir": "solo", "layer": i, "model": model})
+        out, secs, tps = ask(model, task, "bottom", rule, BLIND_TOKENS)
+        entry = {"dir": "solo", "model": model, "sent": out["answer"], "secs": secs, "tok_s": tps,
+                 "cut": out["cut"]}
+        trace.append(entry)
+        on_event({"type": "step", "layer": i, **entry})
+    return trace
 
 
 def main():
@@ -135,11 +169,27 @@ def main():
     p.add_argument("task")
     p.add_argument("--chain", default=DEFAULT_CHAIN, help="models, biggest first, comma-separated")
     p.add_argument("--json", action="store_true", help="print the full trace as JSON")
+    p.add_argument("--blind", action="store_true",
+                   help="every model answers the original task on its own; no relay")
+    p.add_argument("--rule", default="", help="a rule every model must follow (system prompt)")
     a = p.parse_args()
     chain = [m.strip() for m in a.chain.split(",") if m.strip()]
 
     start = time.time()
-    answer, trace = relay(a.task, chain)
+    if a.blind:
+        start = time.time()
+        trace = blind(a.task, chain, a.rule)
+        if a.json:
+            print(json.dumps({"task": a.task, "chain": chain, "rule": a.rule,
+                              "secs": round(time.time() - start, 1), "trace": trace}, indent=2))
+            return
+        print(f"TASK  {a.task}\n")
+        for t in trace:
+            cut = "  (cut off)" if t["cut"] else ""
+            print(f"● {t['model']:<16} {t['secs']:>5}s {t['tok_s']:>4} tok/s{cut}\n    {t['sent']}")
+        print(f"\nTIME    {round(time.time() - start, 1)}s for {len(trace)} calls")
+        return
+    answer, trace = relay(a.task, chain, a.rule)
     mem = loaded()
     result = {"task": a.task, "chain": chain, "answer": answer, "secs": round(time.time() - start, 1),
               "trace": trace,
