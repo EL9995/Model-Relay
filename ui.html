@@ -9,7 +9,7 @@
     --bg: #f6f5f1; --surface: #ffffff; --ink: #1d1d1b; --muted: #6b6a64; --line: #e2e0d8;
     --accent: #2f6fdb; --accent-soft: #e6eefc; --up: #1f8a5b; --up-soft: #e3f4ec;
     --warn: #b7600b; --warn-soft: #fbeedd; --bad: #c0392b; --bad-soft: #fbe5e2;
-    --violet: #7048c8; --violet-soft: #efe9fb;
+    --violet: #7048c8; --violet-soft: #efe9fb; --teal: #0f7c80; --teal-soft: #e0f2f2;
     --mono: ui-monospace, "SF Mono", Menlo, monospace;
   }
   @media (prefers-color-scheme: dark) {
@@ -17,7 +17,7 @@
       --bg: #141414; --surface: #1e1e1d; --ink: #ecebe6; --muted: #9a998f; --line: #34332f;
       --accent: #6c9cf0; --accent-soft: #1d2a40; --up: #4cc08a; --up-soft: #16302a;
       --warn: #e59a4a; --warn-soft: #3a2a17; --bad: #ef6b5b; --bad-soft: #3d1d1a;
-      --violet: #ad8cf2; --violet-soft: #2a2140;
+      --violet: #ad8cf2; --violet-soft: #2a2140; --teal: #4cc4c8; --teal-soft: #13302f;
     }
   }
   * { box-sizing: border-box; }
@@ -85,6 +85,27 @@
   #add { width: 100%; margin-top: 8px; }
   .row .lang { font-size: 12px; padding: 2px 4px; max-width: 108px; }
   .row .fixed-lang { font-size: 12px; color: var(--muted); padding-right: 4px; }
+  .row.off { opacity: .55; }
+  .row .eye { font-size: 11px; color: var(--teal); padding-right: 4px; white-space: nowrap; }
+  .row.off .eye { color: var(--muted); }
+
+  /* ---- image upload ---- */
+  .imgzone { border: 1.5px dashed var(--line); border-radius: 12px; padding: 14px; margin-bottom: 10px;
+             display: flex; align-items: center; gap: 14px; background: var(--surface); }
+  .imgzone[hidden] { display: none; }
+  .imgzone.over { border-color: var(--teal); background: var(--teal-soft); }
+  .imgzone img { width: 88px; height: 88px; object-fit: cover; border-radius: 8px; border: 1px solid var(--line); }
+  .imgzone .ph { width: 88px; height: 88px; border-radius: 8px; background: var(--bg); display: grid;
+                 place-items: center; color: var(--muted); font-size: 28px; flex: none; }
+  .imgzone [hidden] { display: none; }
+  .imgzone .what { flex: 1; min-width: 0; font-size: 13px; color: var(--muted); }
+  .imgzone .what b { display: block; color: var(--ink); font-size: 14px; overflow: hidden;
+                     text-overflow: ellipsis; white-space: nowrap; }
+  .imgzone .acts { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+  .shot { display: block; max-width: 100%; max-height: 260px; border-radius: 8px; margin-top: 10px;
+          border: 1px solid var(--line); }
+  .agree { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; margin-top: 8px; font-size: 13px; }
+  .agree span:nth-child(odd) { font-family: var(--mono); }
   .route { font-size: 13px; line-height: 1.7; }
   .route b { font-weight: 600; color: var(--violet); }
   .pbtns { display: flex; gap: 6px; margin-top: 10px; }
@@ -131,6 +152,7 @@
   .tag.cipher { background: var(--warn-soft); color: var(--warn); }
   .tag.sab { background: var(--bad-soft); color: var(--bad); }
   .tag.translate { background: var(--violet-soft); color: var(--violet); }
+  .tag.vision { background: var(--teal-soft); color: var(--teal); }
   .empty { color: var(--muted); font-size: 13px; padding: 4px 8px 8px; }
 
   /* ---- stage ---- */
@@ -202,6 +224,7 @@
       <button type="button" role="tab" data-mode="blind">Blind</button>
       <button type="button" role="tab" data-mode="cipher">Cipher</button>
       <button type="button" role="tab" data-mode="translate">Translate</button>
+      <button type="button" role="tab" data-mode="vision">Vision</button>
     </div>
   </div>
 </header>
@@ -212,6 +235,19 @@
     <label class="field"><span>Rule for every model <em>· optional</em></span>
       <textarea id="rule" rows="1" placeholder="e.g. Answer in one sentence."></textarea>
     </label>
+    <div class="imgzone" id="imgzone" hidden>
+      <div class="ph" id="imgph" aria-hidden="true">▣</div>
+      <img id="imgprev" alt="" hidden>
+      <div class="what">
+        <b id="imgname">Drop a photo here</b>
+        <span id="imgsub">or paste one, or choose a file. It's shrunk to 1600 px before sending.</span>
+        <div class="acts">
+          <button type="button" class="ghost" id="imgpick">Choose a file</button>
+          <button type="button" class="ghost" id="imgclear" hidden>Remove</button>
+        </div>
+      </div>
+      <input type="file" id="imgfile" accept="image/*" hidden>
+    </div>
     <div class="prompt">
       <textarea id="task" rows="2" aria-label="Prompt"></textarea>
       <div class="pfoot">
@@ -254,6 +290,20 @@
         <button type="button" class="ghost" id="resetRoute">Reset</button>
       </div>
     </section>
+    <section class="panel" id="visionPanel" hidden>
+      <div class="phead"><h2>Vision</h2></div>
+      <p class="phint">Each model that can see images reads the photo on its own. The final agent combines what they found, then does what you typed, if anything.</p>
+      <label class="field"><span>Extract the text as</span>
+        <select id="format" style="width:100%">
+          <option value="text">Plain text</option>
+          <option value="markdown">Markdown (keeps headings and tables)</option>
+          <option value="json">JSON (text plus labeled fields)</option>
+        </select>
+      </label>
+      <label class="field"><span>Final agent</span>
+        <select id="combiner" style="width:100%"></select>
+      </label>
+    </section>
     <details class="panel history">
       <summary>Saved runs <span id="hcount"></span></summary>
       <ol id="hlist"></ol>
@@ -290,6 +340,43 @@ $("#rule").onkeydown = e => {
   if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); $("#task").focus(); }
 };
 
+// ---- the photo for vision mode: shrunk in the browser, sent as base64 JPEG ----
+let image = null;  // {b64, url, name, w, h}
+async function takeImage(file) {
+  if (!file || !file.type.startsWith("image/")) return warn("That isn't an image.");
+  try {
+    const bmp = await createImageBitmap(file);
+    const k = Math.min(1, 1600 / Math.max(bmp.width, bmp.height));
+    const c = document.createElement("canvas");
+    c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
+    const g = c.getContext("2d"); g.fillStyle = "#fff"; g.fillRect(0, 0, c.width, c.height);
+    g.drawImage(bmp, 0, 0, c.width, c.height);
+    const url = c.toDataURL("image/jpeg", 0.9);
+    setImage({ b64: url.split(",")[1], url, name: file.name || "pasted image", w: c.width, h: c.height });
+    warn("");
+  } catch (err) { warn("Couldn't read that image: " + err.message); }
+}
+function setImage(img) {
+  image = img;
+  $("#imgprev").hidden = !img; $("#imgph").hidden = !!img; $("#imgclear").hidden = !img;
+  if (img) $("#imgprev").src = img.url;
+  $("#imgname").textContent = img ? img.name : "Drop a photo here";
+  $("#imgsub").textContent = img ? `${img.w} × ${img.h} · ${Math.round(img.b64.length * 0.75 / 1024)} KB`
+                                 : "or paste one, or choose a file. It's shrunk to 1600 px before sending.";
+}
+$("#imgpick").onclick = () => $("#imgfile").click();
+$("#imgfile").onchange = e => { takeImage(e.target.files[0]); e.target.value = ""; };
+$("#imgclear").onclick = () => setImage(null);
+const zone = $("#imgzone");
+zone.ondragover = e => { e.preventDefault(); zone.classList.add("over"); };
+zone.ondragleave = () => zone.classList.remove("over");
+zone.ondrop = e => { e.preventDefault(); zone.classList.remove("over"); takeImage(e.dataTransfer.files[0]); };
+document.addEventListener("paste", e => {
+  if (current !== "vision") return;
+  const f = [...(e.clipboardData?.files || [])].find(f => f.type.startsWith("image/"));
+  if (f) { e.preventDefault(); takeImage(f); }
+});
+
 // ---- modes ----
 const MODES = {
   relay: { hint: "Each model rewrites the task for the one below. The bottom one answers, and each layer checks it on the way back up.",
@@ -304,7 +391,11 @@ const MODES = {
   translate: { hint: "Each model translates the text into its language, then hands it on. The last one translates back to English so you can compare.",
                placeholder: "Something to translate… e.g. Break a leg tonight, it'll be a piece of cake.",
                chain: "Top to bottom. Each model translates into the language beside it. Drag to reorder; the languages stay in place." },
+  vision: { hint: "Several models read the same photo on their own, then a final agent combines what they found and passes it on.",
+            placeholder: "Optional: what the final agent should do with the text, e.g. List what I bought and the total.",
+            chain: "Models marked “reads” see the photo. The rest are skipped as readers, but any of them can be the final agent." },
 };
+const FMT = { text: "plain text", markdown: "Markdown", json: "JSON" };
 function setMode(m) {
   current = m;
   document.querySelectorAll(".tabs button").forEach(b => b.setAttribute("aria-selected", b.dataset.mode === m));
@@ -312,6 +403,8 @@ function setMode(m) {
   $("#task").placeholder = MODES[m].placeholder;
   $("#cipherPanel").hidden = m !== "cipher";
   $("#translatePanel").hidden = m !== "translate";
+  $("#visionPanel").hidden = m !== "vision";
+  $("#imgzone").hidden = m !== "vision";
   renderChain();
 }
 document.querySelectorAll(".tabs button").forEach(b => b.onclick = () => setMode(b.dataset.mode));
@@ -343,7 +436,11 @@ function renderChain() {
     row.setAttribute("aria-label", `Layer ${i + 1}: ${name}. Arrow keys move it, Delete removes it.`);
     const label = el("span", "name", name); label.append(el("small", null, `${gb(name)} GB`));
     row.append(el("span", "grip", "⋮⋮"), el("span", "n", `${i + 1}`), label);
-    if (current === "translate") {
+    const sees = (installed.find(x => x.name === name) || {}).vision;
+    if (current === "vision") {
+      if (!sees) row.classList.add("off");
+      row.append(el("span", "eye", sees ? "reads" : "can't see images"));
+    } else if (current === "translate") {
       if (i === chain.length - 1) row.append(el("span", "fixed-lang", "→ English"));
       else {
         const sel = el("select", "lang"); sel.setAttribute("aria-label", `Language for layer ${i + 1}`);
@@ -390,6 +487,12 @@ function renderChain() {
   $("#mem").textContent = `${chain.length} models · ${total.toFixed(1)} GB` + (ramGb ? ` · your Mac has ${ramGb} GB` : "") +
     (tight ? ". Not all of them fit in memory at once, so they'll take turns loading, which is slower." : "");
   $("#mem").classList.toggle("tight", !!tight);
+  renderCombiner();
+}
+function renderCombiner(pick) {
+  const sel = $("#combiner"), keep = pick || sel.value || (installed.some(m => m.name === "granite4.2:8b") ? "granite4.2:8b" : installed[0]?.name);
+  sel.replaceChildren(...installed.map(m => { const o = el("option", null, `${m.name} · ${m.gb} GB`); o.value = m.name; return o; }));
+  if (keep) sel.value = keep;
 }
 $("#add").onchange = e => { if (e.target.value) { chain.push(e.target.value); renderChain(); } };
 const routeNow = () => [...route.slice(0, chain.length - 1), "English"];
@@ -445,7 +548,7 @@ function drag(e, row, from) {
 
 // ---- the stage: You at the top, one card per model, a wire above each card ----
 let nodes = [], wires = [], you, planted = null;
-function renderStage(task, rule, runChain, runMode, sabLayer, langs = []) {
+function renderStage(task, rule, runChain, runMode, sabLayer, langs = [], imgUrl = null) {
   const stage = $("#stage"); stage.replaceChildren(); nodes = []; wires = []; planted = null;
   const bar = el("div", "stagebar");
   const all = (fold, text) => { const b = el("button", "ghost", text); b.type = "button";
@@ -456,9 +559,12 @@ function renderStage(task, rule, runChain, runMode, sabLayer, langs = []) {
   const h = el("div", "head"); h.append(el("span", "model", "You"), el("span", "status", ""));
   you.append(h);
   if (rule) { const r = el("div", "msg down show"); r.append(lbl("Rule for every model"), el("div", "txt", rule)); you.append(r); }
-  const m = el("div", "msg down show");
-  m.append(lbl(runMode === "cipher" ? "Secret message" : "Prompt"), el("div", "txt", task));
-  you.append(m);
+  if (imgUrl) { const im = el("img", "shot"); im.src = imgUrl; im.alt = "The photo the models read"; you.append(im); }
+  if (task || runMode !== "vision") {
+    const m = el("div", "msg down show");
+    m.append(lbl({ cipher: "Secret message", vision: "For the final agent" }[runMode] || "Prompt"), el("div", "txt", task));
+    you.append(m);
+  }
   you.enc = el("div", "msg down"); you.answer = el("div", "msg up");
   you.append(you.enc, you.answer);
   stage.append(you);
@@ -468,7 +574,8 @@ function renderStage(task, rule, runChain, runMode, sabLayer, langs = []) {
     const bottom = i === runChain.length - 1;
     const role = { relay: bottom ? "answers" : "rewrites ↓ · checks ↑", blind: "answers on its own",
                    cipher: bottom ? "decodes" : "decodes · re-encodes ↓",
-                   translate: bottom ? "translates back to English" : `translates into ${langs[i]}` }[runMode];
+                   translate: bottom ? "translates back to English" : `translates into ${langs[i]}`,
+                   vision: bottom ? "combines the readings" : "reads the photo" }[runMode];
     const n = el("div", "node");
     const head = el("div", "head");
     head.append(el("span", "layer", `Layer ${i + 1}`), el("span", "model", name), el("span", "role", role));
@@ -524,6 +631,9 @@ function handle(e) {
     if (e.dir === "decode") { flow(e.layer, "down"); busy(e.layer, "decoding…"); }
     if (e.dir === "encode") { busy(e.layer, "encoding for the next model…"); }
     if (e.dir === "translate") { flow(e.layer, "down"); busy(e.layer, `translating into ${e.lang}…`); }
+    if (e.dir === "extract") { flow(e.layer, "down"); busy(e.layer, "reading the photo…"); }
+    if (e.dir === "combine") { flow(e.layer, "down"); busy(e.layer, `combining ${e.layer} readings…`); }
+    if (e.dir === "act") { busy(e.layer, "doing what you asked…"); }
   } else if (e.type === "step") {
     const meta = `${e.secs}s · ${e.tok_s} tok/s` + (e.cut ? " · cut off at the token limit" : "");
     if (e.dir === "down") { fill(n.down, "↓ told the model below", meta, e.sent); n.status.textContent = "waiting for the answer"; }
@@ -551,6 +661,12 @@ function handle(e) {
         n.status.textContent = e.changed ? "changed it" : "approved";
       }
     }
+    if (e.dir === "extract" || e.dir === "combine") {
+      fill(n.down, `${e.dir === "extract" ? "◉ read it as" : "⇢ combined as"} ${FMT[e.format]}`, meta, e.sent,
+           { code: e.format !== "text" });
+      n.status.textContent = "done";
+    }
+    if (e.dir === "act") { fill(n.up, "→ did what you asked", meta, e.sent); n.status.textContent = "done"; }
     if (e.dir === "translate") {
       fill(n.down, `→ ${e.lang}`, meta, e.sent,
            { notes: [!e.script_ok && `This doesn't look like ${e.lang}.`], tone: !e.script_ok && "bad" });
@@ -580,6 +696,15 @@ function finish(e) {
   if (e.mode === "blind") {
     parts.push(lbl("Done"), el("div", "stats",
       `${e.calls} models answered in ${e.secs}s · at most ${e.peak.length} in memory at once · compare their answers below`));
+  } else if (e.mode === "vision") {
+    const asked = e.answer !== e.combined;
+    const res = el("div", "txt" + (e.format !== "text" && !asked ? " code" : ""), e.answer);
+    parts.push(lbl(asked ? "Final agent's answer" : `Combined text · ${FMT[e.format]}`), res);
+    const ag = el("div", "agree");
+    e.agreement.forEach(a => ag.append(el("span", null, a.model), el("span", null, `${Math.round(a.match * 100)}%`)));
+    parts.push(el("div", "stats", "How closely each reading matches the combined text:"), ag);
+    if (e.skipped.length) parts.push(el("div", "stats", `Skipped as readers (can't see images): ${e.skipped.join(", ")}`));
+    parts.push(el("div", "stats", `${e.secs}s · ${e.calls} model calls · final agent: ${e.combiner}`));
   } else if (e.mode === "translate") {
     const pct = Math.round(e.match * 100);
     const [text, tone] = pct >= 70 ? ["Mostly survived", "good"] : pct >= 35 ? ["Drifted", ""] : ["Lost in translation", "bad"];
@@ -626,11 +751,15 @@ async function run(task) {
   const rule = $("#rule").value.trim(), m = current;
   const sab = m === "relay" && chain.includes(saboteur) ? chain.indexOf(saboteur) : null;
   openId = null;
-  renderStage(task, rule, chain, m, sab, routeNow());
+  const readers = chain.filter(n => (installed.find(x => x.name === n) || {}).vision);
+  if (m === "vision") renderStage(task, rule, [...readers, $("#combiner").value], m, null, [], image.url);
+  else renderStage(task, rule, chain, m, sab, routeNow());
   const params = { task, chain: chain.join(","), mode: m, rule, cipher: $("#cipher").value, saboteur: sab ?? "",
-                   langs: route.slice(0, chain.length - 1).join(",") };
+                   langs: route.slice(0, chain.length - 1).join(","),
+                   ...(m === "vision" ? { image: image.b64, format: $("#format").value, combiner: $("#combiner").value } : {}) };
   try {
-    const res = await fetch("/run?" + new URLSearchParams(params));
+    const res = await fetch("/run", { method: "POST", headers: { "Content-Type": "application/json" },
+                                      body: JSON.stringify(params) });
     const reader = res.body.getReader(), dec = new TextDecoder();
     let buf = "";
     for (;;) {
@@ -653,13 +782,21 @@ async function run(task) {
 $("#form").onsubmit = ev => {
   ev.preventDefault();
   const task = $("#task").value.trim();
-  if (task && !running) run(task);
+  if (running) return;
+  if (current === "vision") {
+    if (!image) return warn("Add a photo first: drop one in, paste it, or choose a file.");
+    if (!chain.some(n => (installed.find(x => x.name === n) || {}).vision))
+      return warn("None of the models in the chain can see images. Add gemma3:4b or a gemma4 model.");
+    return run(task);
+  }
+  if (task) run(task);
 };
 
 // ---- saved runs ----
 function summary(r) {
   if (r.mode === "cipher") return `${CNAME[r.cipher] || r.cipher} · ${r.intact ? "intact" : "broke"} → ${r.answer}`;
   if (r.mode === "blind") return `${r.calls} answers`;
+  if (r.mode === "vision") return `${FMT[r.format] || r.format} · ${(r.readers || []).length} readers → ${String(r.answer).split("\n")[0]}`;
   if (r.mode === "translate") return `${(r.langs || []).join(" → ")} · ${Math.round(r.match * 100)}% match → ${r.answer}`;
   const s = r.sabotage;
   return `→ ${r.answer}` + (s ? ` · saboteur ${{ caught: "caught", slipped: "slipped through", no_lie: "didn't lie" }[s.outcome]}` : "");
@@ -674,7 +811,7 @@ async function loadHistory() {
     const b = el("button");
     b.className = r.id === openId ? "current" : "";
     const tag = r.sabotage ? ["sab", "saboteur"] : [r.mode === "relay" ? "" : r.mode, r.mode];
-    b.append(el("span", "tag " + tag[0], tag[1]), el("span", "q", r.task),
+    b.append(el("span", "tag " + tag[0], tag[1]), el("span", "q", r.task || (r.mode === "vision" ? "Read a photo" : "")),
              el("span", "a", `${r.time.slice(5, 16).replace("T", " ")} · ` + summary(r) +
                              ` · ${r.chain.length} models · ${r.secs}s` + (r.rule ? ` · rule: ${r.rule}` : "")));
     b.title = r.task;
@@ -692,12 +829,26 @@ async function openRun(id) {
   grow($("#task"), 260); grow($("#rule"), 120);
   if (r.cipher) $("#cipher").value = r.cipher;
   if (r.langs) route = r.langs.slice(0, -1);
+  if (r.format) $("#format").value = r.format;
+  if (r.combiner) renderCombiner(r.combiner);
+  const imgUrl = r.image ? "/images/" + r.image : null;
+  if (imgUrl) fetch(imgUrl).then(x => x.blob()).then(b => {  // put the photo back so Run repeats the run
+    const fr = new FileReader();
+    fr.onload = () => {
+      const im = new Image();
+      im.onload = () => setImage({ b64: fr.result.split(",")[1], url: fr.result, name: "photo from this run",
+                                   w: im.naturalWidth, h: im.naturalHeight });
+      im.src = fr.result;
+    };
+    fr.readAsDataURL(b);
+  }).catch(() => {});
   saboteur = r.saboteur != null ? r.chain[r.saboteur] : null;
   const missing = r.chain.filter(n => !installed.some(m => m.name === n));
   if (missing.length) warn("Not installed any more: " + missing.join(", "));
   else chain = [...r.chain];
   setMode(r.mode);
-  renderStage(r.task, r.rule, r.chain, r.mode, r.saboteur ?? null, r.langs);
+  if (r.mode === "vision") renderStage(r.task, r.rule, [...r.readers, r.combiner], r.mode, null, [], imgUrl);
+  else renderStage(r.task, r.rule, r.chain, r.mode, r.saboteur ?? null, r.langs);
   if (r.mode === "cipher") handle({ type: "start", cipher: r.ciphers[0], sent: r.encoded });
   const honest = r.sabotage?.outcome === "no_lie";  // older runs didn't record "lied" per step
   r.trace.forEach(t => handle({ type: "step", ...t, ...(t.sabotage && t.lied === undefined ? { lied: !honest } : {}) }));

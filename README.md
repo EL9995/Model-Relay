@@ -24,6 +24,12 @@ The point is the plumbing and the limits, not solving problems.
   position in the chain); the last one always translates back to English, shown next to the original
   with a rough word-match score. Text in clearly the wrong writing system is flagged.
 
+- **Vision**: drop in a photo. Every model in the chain that can see images (gemma3:4b and the
+  gemma4 models) extracts its text on its own, as plain text, Markdown or JSON with labeled fields.
+  A final agent you pick combines the readings and, if you typed an instruction, acts on the result.
+  The page shows how closely each reading matches the combined text. Photos are kept in
+  `runs/images/` so saved runs can show them again.
+
 The chain can be in any order (drag the models on the page, or `--chain`), including smallest on top.
 
 ## Run
@@ -96,3 +102,6 @@ python3 harness.py --show runs/harness/<file>.json   # reprint a scorecard
   (gemma3:1b) was caught (13 of 13), and granite4.2:3b at layer 3 refused to lie 10 of 22 times.
   A saboteur at layer 1 always gets through, since nobody checks the top.
 - ROT13 failed for every config; base64 survived only with a granite model alone.
+- Vision, a cafe receipt read as Markdown by gemma3:4b and gemma4:e2b and combined by granite4.2:8b:
+  both readings and the combined text were word-for-word right, and granite turned it into the
+  item list with the $26.19 total. About 24 s once the models were loaded.

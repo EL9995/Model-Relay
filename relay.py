@@ -19,6 +19,7 @@ Run:   python3 relay.py "2+2"
 import argparse
 import base64
 import difflib
+import hashlib
 import json
 import re
 import sys
@@ -34,6 +35,9 @@ NUM_CTX = 2048      # small context keeps each model's memory down
 KEEP_ALIVE = "10m"  # keep every layer loaded so the way back up is fast
 MAX_TOKENS = 200    # stops a small model that gets stuck repeating itself
 BLIND_TOKENS = 512  # blind answers are the output itself, so give them more room
+VISION_TOKENS = 1024  # a page of extracted text can be long
+VISION_CTX = 4096     # an image takes a few hundred tokens of context on its own
+COMBINE_CTX = 8192    # the final agent reads every extraction at once
 
 DOWN_PROMPT = (
     "You are layer {n} of {total} in a relay chain of AI models. Your boss gave you a task. "
@@ -71,6 +75,13 @@ SCHEMAS = {
            "properties": {"correct": {"type": "boolean"}, "answer": {"type": "string"},
                           "note": {"type": "string"}},
            "required": ["correct", "answer"]},
+    "extract": {"type": "object",
+                "properties": {"text": {"type": "string"},
+                               "fields": {"type": "array", "items": {
+                                   "type": "object",
+                                   "properties": {"name": {"type": "string"}, "value": {"type": "string"}},
+                                   "required": ["name", "value"]}}},
+                "required": ["text", "fields"]},
 }
 
 
@@ -81,15 +92,17 @@ def post(path, body):
         return json.load(r)
 
 
-def ask(model, prompt, kind, rule="", max_tokens=MAX_TOKENS):
+def ask(model, prompt, kind, rule="", max_tokens=MAX_TOKENS, images=None, num_ctx=NUM_CTX):
     """One call to one model. The bottom model replies in plain text, because
     forcing JSON on a 1B model sends it into loops; the others reply in JSON.
-    A rule, if given, goes in as the system prompt."""
+    A rule, if given, goes in as the system prompt. images are base64 strings."""
     body = {"model": model, "prompt": prompt, "stream": False,
             "think": False, "keep_alive": KEEP_ALIVE,
-            "options": {"num_ctx": NUM_CTX, "temperature": 0, "num_predict": max_tokens}}
+            "options": {"num_ctx": num_ctx, "temperature": 0, "num_predict": max_tokens}}
     if rule:
         body["system"] = rule
+    if images:
+        body["images"] = images
     if kind != "bottom":
         body["format"] = SCHEMAS[kind]
     start = time.time()
@@ -382,6 +395,117 @@ def translate(task, chain, rule="", on_event=lambda e: None, route=()):
     return text, trace, {"langs": langs, "match": word_match(task, text)}
 
 
+# ---- vision mode ----
+
+_caps = {}
+
+
+def capabilities(model):
+    """What a model can do, e.g. ["completion", "vision", "tools"]. Asked once per model."""
+    if model not in _caps:
+        _caps[model] = post("/api/show", {"model": model}).get("capabilities", [])
+    return _caps[model]
+
+
+FORMATS = ["text", "markdown", "json"]
+EXTRACT_PROMPTS = {
+    "text": "Read this image and write out all the text in it, exactly as written, in reading order. "
+            "Keep the line breaks. Don't add anything that isn't in the image. Reply with only the text.",
+    "markdown": "Read this image and write out all the text in it as Markdown. Keep the layout: headings "
+                "as headings, lists as lists, tables as Markdown tables. Don't add anything that isn't "
+                "in the image. Reply with only the Markdown.",
+    "json": "Read this image. Put all of its text, in reading order, in \"text\". In \"fields\", list "
+            "each labeled value you can see (a date, a total, a name, an address and so on) as a name "
+            "and a value. Don't add anything that isn't in the image.",
+}
+COMBINE_PROMPT = (
+    "You are the final agent in a chain of AI models. {k} models each read the same image and "
+    "extracted its text. Their extractions are below; they may disagree or contain mistakes.\n\n"
+    "{extractions}\n\nWrite one best version of the image's text{how}. Where they disagree, go with "
+    "what most of them agree on. Don't add anything none of them found."
+)
+COMBINE_HOW = {"text": ", as plain text. Reply with only the text", "markdown": " as Markdown. Reply with only the Markdown",
+               "json": ": all of the text in \"text\", and every labeled value in \"fields\""}
+ACT_PROMPT = "Here is the text from an image:\n\n{text}\n\n{instruction}"
+
+
+def as_text(out, fmt):
+    """A model's extraction as one string; JSON comes back pretty-printed."""
+    if fmt == "json" and "text" in out:
+        return json.dumps({"text": out.get("text", ""), "fields": out.get("fields", [])},
+                          indent=2, ensure_ascii=False)
+    return str(out.get("answer", "")).strip()
+
+
+def plain(text):
+    """The words of an extraction, without JSON keys, for comparing extractions."""
+    try:
+        d = json.loads(text)
+        return " ".join([d.get("text", "")] + [f"{f.get('name', '')} {f.get('value', '')}"
+                                                for f in d.get("fields", [])])
+    except (ValueError, AttributeError):
+        return text
+
+
+def save_image(image_b64):
+    """Keep the image next to the runs, named by its content, so a saved run can show it again."""
+    data = base64.b64decode(image_b64)
+    name = hashlib.sha1(data).hexdigest()[:16] + ".jpg"
+    (RUNS / "images").mkdir(parents=True, exist_ok=True)
+    (RUNS / "images" / name).write_bytes(data)
+    return name
+
+
+def vision(instruction, chain, rule="", on_event=lambda e: None, image_b64="", fmt="text",
+           combiner="granite4.2:8b"):
+    """Fan out, fan in: every model in the chain that can see images extracts the text
+    on its own; then the combiner merges their extractions into one and, if asked,
+    does something with the result."""
+    if not image_b64:
+        raise ValueError("vision mode needs an image")
+    snapshots.clear()
+    readers = [m for m in chain if "vision" in capabilities(m)]
+    if not readers:
+        raise ValueError("none of the models in the chain can see images; add gemma3:4b or a gemma4 model")
+    kind = "extract" if fmt == "json" else "bottom"
+    trace, texts = [], []
+
+    def step(entry):
+        trace.append(entry)
+        on_event({"type": "step", **entry})
+
+    for i, model in enumerate(readers):
+        on_event({"type": "call", "dir": "extract", "layer": i, "model": model})
+        out, secs, tps = ask(model, EXTRACT_PROMPTS[fmt], kind, rule, VISION_TOKENS, [image_b64], VISION_CTX)
+        texts.append(as_text(out, fmt))
+        step({"dir": "extract", "layer": i, "model": model, "sent": texts[-1], "format": fmt,
+              "secs": secs, "tok_s": tps, "cut": out["cut"]})
+
+    k = len(readers)
+    extractions = "\n\n".join(f"--- Extraction {j + 1} ({m}) ---\n{t}" for j, (m, t) in enumerate(zip(readers, texts)))
+    on_event({"type": "call", "dir": "combine", "layer": k, "model": combiner})
+    out, secs, tps = ask(combiner, COMBINE_PROMPT.format(k=k, extractions=extractions, how=COMBINE_HOW[fmt]),
+                         kind, rule, VISION_TOKENS, num_ctx=COMBINE_CTX)
+    combined = as_text(out, fmt)
+    step({"dir": "combine", "layer": k, "model": combiner, "sent": combined, "format": fmt,
+          "secs": secs, "tok_s": tps, "cut": out["cut"]})
+
+    answer = combined
+    if instruction:
+        on_event({"type": "call", "dir": "act", "layer": k, "model": combiner})
+        out, secs, tps = ask(combiner, ACT_PROMPT.format(text=combined, instruction=instruction), "bottom",
+                             rule, VISION_TOKENS, num_ctx=COMBINE_CTX)
+        answer = out["answer"]
+        step({"dir": "act", "layer": k, "model": combiner, "sent": answer, "secs": secs, "tok_s": tps,
+              "cut": out["cut"]})
+
+    return answer, trace, {
+        "format": fmt, "combiner": combiner, "readers": readers, "combined": combined,
+        "skipped": [m for m in chain if m not in readers], "image": save_image(image_b64),
+        "agreement": [{"model": m, "match": word_match(plain(t), plain(combined))}
+                      for m, t in zip(readers, texts)]}
+
+
 def blind(task, chain, rule="", on_event=lambda e: None):
     """Every model gets the original task word for word and answers on its own.
     No model sees another's answer. One model at a time, so it fits in memory."""
@@ -398,7 +522,7 @@ def blind(task, chain, rule="", on_event=lambda e: None):
 
 
 def run(task, chain, mode="relay", rule="", on_event=lambda e: None, save=True,
-        saboteur=None, cipher_name="base64", route=()):
+        saboteur=None, cipher_name="base64", route=(), image=None, fmt="text", combiner="granite4.2:8b"):
     """Run one relay, blind, cipher or translate pass and return its record, saved to runs/
     unless save=False."""
     start = time.time()
@@ -409,6 +533,8 @@ def run(task, chain, mode="relay", rule="", on_event=lambda e: None, save=True,
         answer, trace, extra = cipher(task, chain, rule, on_event, cipher_name)
     elif mode == "translate":
         answer, trace, extra = translate(task, chain, rule, on_event, route)
+    elif mode == "vision":
+        answer, trace, extra = vision(task, chain, rule, on_event, image, fmt, combiner)
     else:
         if saboteur is not None and not 0 <= saboteur < len(chain):
             raise ValueError(f"saboteur layer {saboteur + 1} isn't in a {len(chain)}-model chain")
@@ -424,7 +550,7 @@ def run(task, chain, mode="relay", rule="", on_event=lambda e: None, save=True,
 def save_run(record):
     RUNS.mkdir(exist_ok=True)
     stamp = time.strftime("%Y-%m-%d_%H%M%S")
-    slug = re.sub(r"[^a-z0-9]+", "-", record["task"].lower()).strip("-")[:40].strip("-") or "run"
+    slug = re.sub(r"[^a-z0-9]+", "-", (record["task"] or record["mode"]).lower()).strip("-")[:40].strip("-") or "run"
     rid, n = f"{stamp}_{slug}", 2
     while (RUNS / f"{rid}.json").exists():
         rid, n = f"{stamp}_{slug}-{n}", n + 1
@@ -451,7 +577,7 @@ def list_runs():
             continue
         runs.append({k: r.get(k) for k in ("id", "time", "mode", "task", "rule", "chain", "answer",
                                            "secs", "calls", "cipher", "intact", "sabotage",
-                                           "langs", "match")})
+                                           "langs", "match", "format", "combiner", "image", "readers")})
     return runs
 
 

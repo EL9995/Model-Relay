@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Local web page for the relay: type a task, watch it travel down the chain and back up.
-Also runs blind mode (every model answers alone) and cipher mode (a secret message is passed down).
+Also runs blind, cipher, translate and vision (read an image, then hand the text on) modes.
 
 Run:   python3 server.py        then open http://localhost:8765
 """
 
 import json
 import os
+import re
+from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -16,6 +18,14 @@ import relay
 PORT = 8765
 PAGE = Path(__file__).with_name("ui.html")
 RAM_GB = round(os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / 2**30)  # GiB, as Apple advertises it
+MAX_BODY = 25 * 2**20  # an uploaded image, base64-encoded
+
+
+def caps(name):
+    try:
+        return relay.capabilities(name)
+    except OSError:
+        return []
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -26,8 +36,11 @@ class Handler(BaseHTTPRequestHandler):
             self.reply(200, "text/html; charset=utf-8", PAGE.read_bytes())
         elif url.path == "/models":
             try:
-                models = [{"name": m["name"], "gb": round(m["size"] / 1e9, 1)}
-                          for m in relay.post_get("/api/tags").get("models", [])]
+                tags = relay.post_get("/api/tags").get("models", [])
+                with ThreadPoolExecutor(8) as pool:
+                    found = list(pool.map(caps, [m["name"] for m in tags]))
+                models = [{"name": m["name"], "gb": round(m["size"] / 1e9, 1), "vision": "vision" in c,
+                           "tools": "tools" in c} for m, c in zip(tags, found)]
                 body = {"models": models, "default": relay.DEFAULT_CHAIN.split(","), "ram_gb": RAM_GB,
                         "languages": relay.LANGUAGES[:-1], "route": relay.DEFAULT_ROUTE}
             except OSError as e:
@@ -41,16 +54,30 @@ class Handler(BaseHTTPRequestHandler):
                 self.reply(200, "application/json", json.dumps(r, ensure_ascii=False).encode())
             else:
                 self.reply(404, "text/plain", b"no such run")
+        elif url.path.startswith("/images/"):
+            name = url.path[len("/images/"):]
+            path = relay.RUNS / "images" / name
+            if re.fullmatch(r"[0-9a-f]{16}\.jpg", name) and path.is_file():
+                self.reply(200, "image/jpeg", path.read_bytes())
+            else:
+                self.reply(404, "text/plain", b"no such image")
         elif url.path == "/run" and q.get("task"):
-            sab = q.get("saboteur", "")
-            self.run_relay(q["task"], [m for m in q.get("chain", "").split(",") if m],
-                           q.get("mode", "relay"), q.get("rule", ""),
-                           int(sab) if sab.isdigit() else None, q.get("cipher", "base64"),
-                           [l for l in q.get("langs", "").split(",") if l])
+            self.run_relay(q)
         else:
             self.reply(404, "text/plain", b"not found")
 
-    def run_relay(self, task, chain, mode, rule, saboteur, cipher, langs):
+    def do_POST(self):
+        """Same as GET /run, but the settings come as JSON, so an image fits."""
+        size = int(self.headers.get("Content-Length") or 0)
+        if urlparse(self.path).path != "/run" or not 0 < size <= MAX_BODY:
+            return self.reply(413 if size > MAX_BODY else 404, "text/plain", b"bad request")
+        try:
+            q = json.loads(self.rfile.read(size))
+        except ValueError:
+            return self.reply(400, "text/plain", b"body isn't JSON")
+        self.run_relay(q)
+
+    def run_relay(self, q):
         """Stream relay events to the page as server-sent events, one per line pair."""
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
@@ -61,11 +88,17 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(f"data: {json.dumps(event)}\n\n".encode())
             self.wfile.flush()
 
+        split = lambda v: v if isinstance(v, list) else [x for x in str(v or "").split(",") if x]
+        mode, cipher, sab = q.get("mode", "relay"), q.get("cipher", "base64"), str(q.get("saboteur", ""))
         try:
             if mode == "cipher" and cipher not in [*relay.CIPHERS, "mix"]:
                 raise ValueError(f"unknown cipher {cipher!r}")
-            r = relay.run(task, chain or relay.DEFAULT_CHAIN.split(","), mode, rule, send,
-                          saboteur=saboteur, cipher_name=cipher, route=langs)
+            if mode == "vision" and q.get("format", "text") not in relay.FORMATS:
+                raise ValueError(f"unknown format {q.get('format')!r}")
+            r = relay.run(q.get("task", ""), split(q.get("chain")) or relay.DEFAULT_CHAIN.split(","), mode,
+                          q.get("rule", ""), send, saboteur=int(sab) if sab.isdigit() else None,
+                          cipher_name=cipher, route=split(q.get("langs")), image=q.get("image"),
+                          fmt=q.get("format", "text"), combiner=q.get("combiner") or "granite4.2:8b")
             send({"type": "done", **{k: v for k, v in r.items() if k != "trace"}})
         except (BrokenPipeError, ConnectionResetError):
             pass  # the page was closed mid-run
