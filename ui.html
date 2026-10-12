@@ -535,8 +535,11 @@ function renderChain() {
     r.style.transition = ""; r.style.transform = "";
   });
 
-  const add = $("#add"), rest = installed.filter(m => !chain.includes(m.name));
-  const first = el("option", null, rest.length ? "+ Add a model" : "All installed models are in the chain");
+  const seeing = current === "vision";  // the Vision tab only offers models that can see images
+  const add = $("#add"), rest = installed.filter(m => !chain.includes(m.name) && (!seeing || m.vision));
+  const first = el("option", null, rest.length ? (seeing ? "+ Add a model that can see images" : "+ Add a model")
+                                              : seeing ? "All models that can see images are in the chain"
+                                                       : "All installed models are in the chain");
   first.value = ""; add.replaceChildren(first);
   rest.forEach(m => { const o = el("option", null, `${m.name} · ${m.gb} GB`); o.value = m.name; add.append(o); });
   add.disabled = !rest.length;
