@@ -18,7 +18,7 @@ import relay
 PORT = 8765
 PAGE = Path(__file__).with_name("ui.html")
 RAM_GB = round(os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / 2**30)  # GiB, as Apple advertises it
-MAX_BODY = 25 * 2**20  # an uploaded image, base64-encoded
+MAX_BODY = 60 * 2**20  # uploaded photos, base64-encoded
 
 
 def caps(name):
@@ -97,8 +97,9 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError(f"unknown format {q.get('format')!r}")
             r = relay.run(q.get("task", ""), split(q.get("chain")) or relay.DEFAULT_CHAIN.split(","), mode,
                           q.get("rule", ""), send, saboteur=int(sab) if sab.isdigit() else None,
-                          cipher_name=cipher, route=split(q.get("langs")), image=q.get("image"),
-                          fmt=q.get("format", "text"), combiner=q.get("combiner") or "granite4.2:8b")
+                          cipher_name=cipher, route=split(q.get("langs")),
+                          images=q.get("images") or [q.get("image")], fmt=q.get("format", "text"),
+                          combiner=q.get("combiner") or "granite4.2:8b", strategy=q.get("strategy", "batch"))
             send({"type": "done", **{k: v for k, v in r.items() if k != "trace"}})
         except (BrokenPipeError, ConnectionResetError):
             pass  # the page was closed mid-run

@@ -98,6 +98,21 @@
   .imgzone .ph { width: 88px; height: 88px; border-radius: 8px; background: var(--bg); display: grid;
                  place-items: center; color: var(--muted); font-size: 28px; flex: none; }
   .imgzone [hidden] { display: none; }
+  .thumbs { display: flex; flex-wrap: wrap; gap: 6px; }
+  .thumb { position: relative; }
+  .thumb img { width: 64px; height: 64px; }
+  .thumb .num { position: absolute; left: 4px; top: 4px; font-size: 11px; font-weight: 600; color: #fff;
+                background: rgba(0, 0, 0, .6); border-radius: 4px; padding: 0 5px; }
+  .thumb button { position: absolute; right: -6px; top: -6px; width: 20px; height: 20px; padding: 0;
+                  border-radius: 50%; background: var(--ink); color: var(--surface); font-size: 12px; line-height: 1; }
+  .shots { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  .shots .shot { margin-top: 0; max-height: 200px; max-width: 48%; }
+  .strat { display: flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .strat button { flex: 1; background: none; color: var(--muted); font-size: 12px; padding: 6px 4px; border-radius: 0; }
+  .strat button + button { border-left: 1px solid var(--line); }
+  .strat button[aria-pressed=true] { background: var(--teal); color: #fff; }
+  .shint { font-size: 12px; color: var(--muted); margin: 6px 0 0; }
+  .shint.tight { color: var(--warn); }
   .imgzone .what { flex: 1; min-width: 0; font-size: 13px; color: var(--muted); }
   .imgzone .what b { display: block; color: var(--ink); font-size: 14px; overflow: hidden;
                      text-overflow: ellipsis; white-space: nowrap; }
@@ -237,16 +252,16 @@
     </label>
     <div class="imgzone" id="imgzone" hidden>
       <div class="ph" id="imgph" aria-hidden="true">▣</div>
-      <img id="imgprev" alt="" hidden>
+      <div class="thumbs" id="thumbs" hidden></div>
       <div class="what">
-        <b id="imgname">Drop a photo here</b>
-        <span id="imgsub">or paste one, or choose a file. It's shrunk to 1600 px before sending.</span>
+        <b id="imgname">Drop photos here</b>
+        <span id="imgsub">or paste them, or choose files. Up to 8; each is shrunk to 1600 px before sending.</span>
         <div class="acts">
-          <button type="button" class="ghost" id="imgpick">Choose a file</button>
-          <button type="button" class="ghost" id="imgclear" hidden>Remove</button>
+          <button type="button" class="ghost" id="imgpick">Choose files</button>
+          <button type="button" class="ghost" id="imgclear" hidden>Remove all</button>
         </div>
       </div>
-      <input type="file" id="imgfile" accept="image/*" hidden>
+      <input type="file" id="imgfile" accept="image/*" multiple hidden>
     </div>
     <div class="prompt">
       <textarea id="task" rows="2" aria-label="Prompt"></textarea>
@@ -303,6 +318,14 @@
       <label class="field"><span>Final agent</span>
         <select id="combiner" style="width:100%"></select>
       </label>
+      <div class="field"><span>With several photos</span>
+        <div class="strat" role="group" aria-label="How to process several photos">
+          <button type="button" data-strategy="together">All at once</button>
+          <button type="button" data-strategy="batch">Batch</button>
+          <button type="button" data-strategy="stream">Photo by photo</button>
+        </div>
+        <p class="shint" id="stratHint"></p>
+      </div>
     </section>
     <details class="panel history">
       <summary>Saved runs <span id="hcount"></span></summary>
@@ -340,42 +363,77 @@ $("#rule").onkeydown = e => {
   if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); $("#task").focus(); }
 };
 
-// ---- the photo for vision mode: shrunk in the browser, sent as base64 JPEG ----
-let image = null;  // {b64, url, name, w, h}
-async function takeImage(file) {
-  if (!file || !file.type.startsWith("image/")) return warn("That isn't an image.");
-  try {
-    const bmp = await createImageBitmap(file);
-    const k = Math.min(1, 1600 / Math.max(bmp.width, bmp.height));
-    const c = document.createElement("canvas");
-    c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
-    const g = c.getContext("2d"); g.fillStyle = "#fff"; g.fillRect(0, 0, c.width, c.height);
-    g.drawImage(bmp, 0, 0, c.width, c.height);
-    const url = c.toDataURL("image/jpeg", 0.9);
-    setImage({ b64: url.split(",")[1], url, name: file.name || "pasted image", w: c.width, h: c.height });
-    warn("");
-  } catch (err) { warn("Couldn't read that image: " + err.message); }
+// ---- photos for vision mode: each shrunk in the browser, sent as base64 JPEG ----
+const MAX_PHOTOS = 8;
+let images = [];  // [{b64, url, name, w, h}]
+async function shrink(file) {
+  const bmp = await createImageBitmap(file);
+  const k = Math.min(1, 1600 / Math.max(bmp.width, bmp.height));
+  const c = document.createElement("canvas");
+  c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
+  const g = c.getContext("2d"); g.fillStyle = "#fff"; g.fillRect(0, 0, c.width, c.height);
+  g.drawImage(bmp, 0, 0, c.width, c.height);
+  const url = c.toDataURL("image/jpeg", 0.9);
+  return { b64: url.split(",")[1], url, name: file.name || "pasted image", w: c.width, h: c.height };
 }
-function setImage(img) {
-  image = img;
-  $("#imgprev").hidden = !img; $("#imgph").hidden = !!img; $("#imgclear").hidden = !img;
-  if (img) $("#imgprev").src = img.url;
-  $("#imgname").textContent = img ? img.name : "Drop a photo here";
-  $("#imgsub").textContent = img ? `${img.w} × ${img.h} · ${Math.round(img.b64.length * 0.75 / 1024)} KB`
-                                 : "or paste one, or choose a file. It's shrunk to 1600 px before sending.";
+async function takeImages(files) {
+  const pics = [...files].filter(f => f.type.startsWith("image/"));
+  if (!pics.length) return warn("That isn't an image.");
+  warn("");
+  for (const f of pics) {
+    if (images.length >= MAX_PHOTOS) { warn(`Up to ${MAX_PHOTOS} photos per run.`); break; }
+    try { images.push(await shrink(f)); } catch (err) { warn(`Couldn't read ${f.name}: ${err.message}`); }
+    renderImages();
+  }
+}
+function renderImages() {
+  const box = $("#thumbs");
+  box.replaceChildren(...images.map((img, i) => {
+    const t = el("div", "thumb"), im = el("img"), x = el("button", null, "✕");
+    im.src = img.url; im.alt = `Photo ${i + 1}: ${img.name}`; x.type = "button"; x.title = "Remove this photo";
+    x.onclick = () => { images.splice(i, 1); renderImages(); };
+    t.append(im, el("span", "num", i + 1), x);
+    return t;
+  }));
+  box.hidden = !images.length; $("#imgph").hidden = !!images.length; $("#imgclear").hidden = !images.length;
+  const kb = Math.round(images.reduce((t, i) => t + i.b64.length * 0.75, 0) / 1024);
+  $("#imgname").textContent = images.length === 1 ? images[0].name : images.length ? `${images.length} photos` : "Drop photos here";
+  $("#imgsub").textContent = images.length
+    ? (images.length === 1 ? `${images[0].w} × ${images[0].h} · ` : "") + `${kb} KB · add more by dropping or pasting`
+    : `or paste them, or choose files. Up to ${MAX_PHOTOS}; each is shrunk to 1600 px before sending.`;
+  renderStrategy();
 }
 $("#imgpick").onclick = () => $("#imgfile").click();
-$("#imgfile").onchange = e => { takeImage(e.target.files[0]); e.target.value = ""; };
-$("#imgclear").onclick = () => setImage(null);
+$("#imgfile").onchange = e => { takeImages(e.target.files); e.target.value = ""; };
+$("#imgclear").onclick = () => { images = []; renderImages(); };
 const zone = $("#imgzone");
 zone.ondragover = e => { e.preventDefault(); zone.classList.add("over"); };
 zone.ondragleave = () => zone.classList.remove("over");
-zone.ondrop = e => { e.preventDefault(); zone.classList.remove("over"); takeImage(e.dataTransfer.files[0]); };
+zone.ondrop = e => { e.preventDefault(); zone.classList.remove("over"); takeImages(e.dataTransfer.files); };
 document.addEventListener("paste", e => {
   if (current !== "vision") return;
-  const f = [...(e.clipboardData?.files || [])].find(f => f.type.startsWith("image/"));
-  if (f) { e.preventDefault(); takeImage(f); }
+  const fs = [...(e.clipboardData?.files || [])].filter(f => f.type.startsWith("image/"));
+  if (fs.length) { e.preventDefault(); takeImages(fs); }
 });
+
+// ---- how several photos are processed ----
+const STRAT = {
+  together: { name: "All at once", hint: "Each reader gets every photo in one call. Best for questions across the photos." },
+  batch: { name: "Batch", hint: "Every reader reads every photo, then the final agent combines each one. Fewest model swaps, usually the fastest overall." },
+  stream: { name: "Photo by photo", hint: "Each photo is read and combined before the next one starts, so the first result shows up sooner." },
+};
+let strategy = "batch";
+function renderStrategy() {
+  document.querySelectorAll(".strat button").forEach(b => b.setAttribute("aria-pressed", b.dataset.strategy === strategy));
+  const readers = chain.filter(n => (installed.find(x => x.name === n) || {}).vision);
+  const need = [...new Set([...readers, $("#combiner").value])].reduce((t, n) => t + gb(n), 0);
+  const tight = strategy === "stream" && ramGb && need > ramGb * 0.6;
+  $("#stratHint").textContent = STRAT[strategy].hint + (images.length === 1 ? " (With one photo, all three work the same.)" : "") +
+    (tight ? ` These models (${need.toFixed(1)} GB) don't all fit in memory together, so they'll reload for every photo.` : "");
+  $("#stratHint").classList.toggle("tight", !!tight);
+}
+document.querySelectorAll(".strat button").forEach(b => b.onclick = () => { strategy = b.dataset.strategy; renderStrategy(); });
+$("#combiner").onchange = () => renderStrategy();
 
 // ---- modes ----
 const MODES = {
@@ -493,6 +551,7 @@ function renderCombiner(pick) {
   const sel = $("#combiner"), keep = pick || sel.value || (installed.some(m => m.name === "granite4.2:8b") ? "granite4.2:8b" : installed[0]?.name);
   sel.replaceChildren(...installed.map(m => { const o = el("option", null, `${m.name} · ${m.gb} GB`); o.value = m.name; return o; }));
   if (keep) sel.value = keep;
+  renderStrategy();
 }
 $("#add").onchange = e => { if (e.target.value) { chain.push(e.target.value); renderChain(); } };
 const routeNow = () => [...route.slice(0, chain.length - 1), "English"];
@@ -548,7 +607,7 @@ function drag(e, row, from) {
 
 // ---- the stage: You at the top, one card per model, a wire above each card ----
 let nodes = [], wires = [], you, planted = null;
-function renderStage(task, rule, runChain, runMode, sabLayer, langs = [], imgUrl = null) {
+function renderStage(task, rule, runChain, runMode, sabLayer, langs = [], imgUrls = []) {
   const stage = $("#stage"); stage.replaceChildren(); nodes = []; wires = []; planted = null;
   const bar = el("div", "stagebar");
   const all = (fold, text) => { const b = el("button", "ghost", text); b.type = "button";
@@ -559,7 +618,11 @@ function renderStage(task, rule, runChain, runMode, sabLayer, langs = [], imgUrl
   const h = el("div", "head"); h.append(el("span", "model", "You"), el("span", "status", ""));
   you.append(h);
   if (rule) { const r = el("div", "msg down show"); r.append(lbl("Rule for every model"), el("div", "txt", rule)); you.append(r); }
-  if (imgUrl) { const im = el("img", "shot"); im.src = imgUrl; im.alt = "The photo the models read"; you.append(im); }
+  if (imgUrls.length) {
+    const shots = el("div", "shots");
+    imgUrls.forEach((u, i) => { const im = el("img", "shot"); im.src = u; im.alt = `Photo ${i + 1}`; shots.append(im); });
+    you.append(shots);
+  }
   if (task || runMode !== "vision") {
     const m = el("div", "msg down show");
     m.append(lbl({ cipher: "Secret message", vision: "For the final agent" }[runMode] || "Prompt"), el("div", "txt", task));
@@ -597,6 +660,11 @@ function setFolded(n, fold) {
   n.fold.setAttribute("aria-label", (fold ? "Expand" : "Collapse") + n.fold.getAttribute("aria-label").replace(/^\w+/, ""));
 }
 
+function addMsg(n, cls, label, meta, text, opts) {  // for cards that collect several messages
+  const box = el("div", "msg " + cls); n.append(box); fill(box, label, meta, text, opts);
+}
+const photoName = p => p === null ? "all photos" : p === undefined ? "the photo" : `photo ${p + 1}`;
+
 function lbl(text, meta) {
   const l = el("div", "lbl"); l.append(el("span", null, text));
   if (meta) l.append(el("span", null, meta));
@@ -631,8 +699,8 @@ function handle(e) {
     if (e.dir === "decode") { flow(e.layer, "down"); busy(e.layer, "decoding…"); }
     if (e.dir === "encode") { busy(e.layer, "encoding for the next model…"); }
     if (e.dir === "translate") { flow(e.layer, "down"); busy(e.layer, `translating into ${e.lang}…`); }
-    if (e.dir === "extract") { flow(e.layer, "down"); busy(e.layer, "reading the photo…"); }
-    if (e.dir === "combine") { flow(e.layer, "down"); busy(e.layer, `combining ${e.layer} readings…`); }
+    if (e.dir === "extract") { flow(e.layer, "down"); busy(e.layer, `reading ${photoName(e.photo)}…`); }
+    if (e.dir === "combine") { flow(e.layer, "down"); busy(e.layer, `combining the readings of ${photoName(e.photo)}…`); }
     if (e.dir === "act") { busy(e.layer, "doing what you asked…"); }
   } else if (e.type === "step") {
     const meta = `${e.secs}s · ${e.tok_s} tok/s` + (e.cut ? " · cut off at the token limit" : "");
@@ -661,12 +729,13 @@ function handle(e) {
         n.status.textContent = e.changed ? "changed it" : "approved";
       }
     }
+    const when = (e.load >= 0.5 ? ` · ${e.load}s loading` : "") + (e.at != null ? ` · done at ${e.at}s` : "");
     if (e.dir === "extract" || e.dir === "combine") {
-      fill(n.down, `${e.dir === "extract" ? "◉ read it as" : "⇢ combined as"} ${FMT[e.format]}`, meta, e.sent,
-           { code: e.format !== "text" });
+      addMsg(n, "down", `${e.dir === "extract" ? "◉ read" : "⇢ combined"} ${photoName(e.photo)} · ${FMT[e.format]}`,
+             meta + when, e.sent, { code: e.format !== "text" });
       n.status.textContent = "done";
     }
-    if (e.dir === "act") { fill(n.up, "→ did what you asked", meta, e.sent); n.status.textContent = "done"; }
+    if (e.dir === "act") { addMsg(n, "up", "→ did what you asked", meta + when, e.sent); n.status.textContent = "done"; }
     if (e.dir === "translate") {
       fill(n.down, `→ ${e.lang}`, meta, e.sent,
            { notes: [!e.script_ok && `This doesn't look like ${e.lang}.`], tone: !e.script_ok && "bad" });
@@ -704,7 +773,10 @@ function finish(e) {
     e.agreement.forEach(a => ag.append(el("span", null, a.model), el("span", null, `${Math.round(a.match * 100)}%`)));
     parts.push(el("div", "stats", "How closely each reading matches the combined text:"), ag);
     if (e.skipped.length) parts.push(el("div", "stats", `Skipped as readers (can't see images): ${e.skipped.join(", ")}`));
-    parts.push(el("div", "stats", `${e.secs}s · ${e.calls} model calls · final agent: ${e.combiner}`));
+    const count = (e.images || [e.image]).length;
+    if (e.first_result != null)
+      parts.push(el("div", "verdict", `${count > 1 ? STRAT[e.strategy].name + " · " : ""}first result at ${e.first_result}s · all done at ${e.secs}s · ${e.load_secs}s loading models`));
+    parts.push(el("div", "stats", `${count} photo${count > 1 ? "s" : ""} · ${e.calls} model calls · final agent: ${e.combiner}`));
   } else if (e.mode === "translate") {
     const pct = Math.round(e.match * 100);
     const [text, tone] = pct >= 70 ? ["Mostly survived", "good"] : pct >= 35 ? ["Drifted", ""] : ["Lost in translation", "bad"];
@@ -752,11 +824,12 @@ async function run(task) {
   const sab = m === "relay" && chain.includes(saboteur) ? chain.indexOf(saboteur) : null;
   openId = null;
   const readers = chain.filter(n => (installed.find(x => x.name === n) || {}).vision);
-  if (m === "vision") renderStage(task, rule, [...readers, $("#combiner").value], m, null, [], image.url);
+  if (m === "vision") renderStage(task, rule, [...readers, $("#combiner").value], m, null, [], images.map(i => i.url));
   else renderStage(task, rule, chain, m, sab, routeNow());
   const params = { task, chain: chain.join(","), mode: m, rule, cipher: $("#cipher").value, saboteur: sab ?? "",
                    langs: route.slice(0, chain.length - 1).join(","),
-                   ...(m === "vision" ? { image: image.b64, format: $("#format").value, combiner: $("#combiner").value } : {}) };
+                   ...(m === "vision" ? { images: images.map(i => i.b64), format: $("#format").value,
+                                          combiner: $("#combiner").value, strategy } : {}) };
   try {
     const res = await fetch("/run", { method: "POST", headers: { "Content-Type": "application/json" },
                                       body: JSON.stringify(params) });
@@ -784,7 +857,7 @@ $("#form").onsubmit = ev => {
   const task = $("#task").value.trim();
   if (running) return;
   if (current === "vision") {
-    if (!image) return warn("Add a photo first: drop one in, paste it, or choose a file.");
+    if (!images.length) return warn("Add a photo first: drop one in, paste it, or choose a file.");
     if (!chain.some(n => (installed.find(x => x.name === n) || {}).vision))
       return warn("None of the models in the chain can see images. Add gemma3:4b or a gemma4 model.");
     return run(task);
@@ -796,7 +869,10 @@ $("#form").onsubmit = ev => {
 function summary(r) {
   if (r.mode === "cipher") return `${CNAME[r.cipher] || r.cipher} · ${r.intact ? "intact" : "broke"} → ${r.answer}`;
   if (r.mode === "blind") return `${r.calls} answers`;
-  if (r.mode === "vision") return `${FMT[r.format] || r.format} · ${(r.readers || []).length} readers → ${String(r.answer).split("\n")[0]}`;
+  if (r.mode === "vision") {
+    const count = (r.images || [r.image]).length;
+    return `${count} photo${count > 1 ? "s" : ""}${count > 1 && r.strategy ? " · " + STRAT[r.strategy].name : ""} · ${FMT[r.format] || r.format} · ${(r.readers || []).length} readers → ${String(r.answer).split("\n")[0]}`;
+  }
   if (r.mode === "translate") return `${(r.langs || []).join(" → ")} · ${Math.round(r.match * 100)}% match → ${r.answer}`;
   const s = r.sabotage;
   return `→ ${r.answer}` + (s ? ` · saboteur ${{ caught: "caught", slipped: "slipped through", no_lie: "didn't lie" }[s.outcome]}` : "");
@@ -831,23 +907,17 @@ async function openRun(id) {
   if (r.langs) route = r.langs.slice(0, -1);
   if (r.format) $("#format").value = r.format;
   if (r.combiner) renderCombiner(r.combiner);
-  const imgUrl = r.image ? "/images/" + r.image : null;
-  if (imgUrl) fetch(imgUrl).then(x => x.blob()).then(b => {  // put the photo back so Run repeats the run
-    const fr = new FileReader();
-    fr.onload = () => {
-      const im = new Image();
-      im.onload = () => setImage({ b64: fr.result.split(",")[1], url: fr.result, name: "photo from this run",
-                                   w: im.naturalWidth, h: im.naturalHeight });
-      im.src = fr.result;
-    };
-    fr.readAsDataURL(b);
-  }).catch(() => {});
+  const imgUrls = (r.images || (r.image ? [r.image] : [])).map(n => "/images/" + n);
+  if (r.strategy) strategy = r.strategy;
+  if (imgUrls.length) Promise.all(imgUrls.map(u => fetch(u).then(x => x.blob())))  // put the photos back so Run repeats the run
+    .then(blobs => { images = []; return takeImages(blobs.map((b, i) => new File([b], `photo ${i + 1} from this run`, { type: "image/jpeg" }))); })
+    .catch(() => {});
   saboteur = r.saboteur != null ? r.chain[r.saboteur] : null;
   const missing = r.chain.filter(n => !installed.some(m => m.name === n));
   if (missing.length) warn("Not installed any more: " + missing.join(", "));
   else chain = [...r.chain];
   setMode(r.mode);
-  if (r.mode === "vision") renderStage(r.task, r.rule, [...r.readers, r.combiner], r.mode, null, [], imgUrl);
+  if (r.mode === "vision") renderStage(r.task, r.rule, [...r.readers, r.combiner], r.mode, null, [], imgUrls);
   else renderStage(r.task, r.rule, r.chain, r.mode, r.saboteur ?? null, r.langs);
   if (r.mode === "cipher") handle({ type: "start", cipher: r.ciphers[0], sent: r.encoded });
   const honest = r.sabotage?.outcome === "no_lie";  // older runs didn't record "lied" per step

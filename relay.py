@@ -119,6 +119,7 @@ def ask(model, prompt, kind, rule="", max_tokens=MAX_TOKENS, images=None, num_ct
     except ValueError:
         out = {"answer": r["response"].strip(), "instruction": r["response"].strip()}
     out["cut"] = r.get("done_reason") == "length"  # hit the token cap mid-answer
+    out["load"] = round(r.get("load_duration", 0) / 1e9, 1)  # seconds spent loading the model first
     toks = r.get("eval_count", 0)
     tps = toks / (r["eval_duration"] / 1e9) if r.get("eval_duration") else 0
     snapshots.append([n for n, _, _ in loaded()])
@@ -419,14 +420,26 @@ EXTRACT_PROMPTS = {
             "and a value. Don't add anything that isn't in the image.",
 }
 COMBINE_PROMPT = (
-    "You are the final agent in a chain of AI models. {k} models each read the same image and "
-    "extracted its text. Their extractions are below; they may disagree or contain mistakes.\n\n"
-    "{extractions}\n\nWrite one best version of the image's text{how}. Where they disagree, go with "
-    "what most of them agree on. Don't add anything none of them found."
+    "You are the final agent in a chain of AI models. {k} models each read the same {what} and "
+    "extracted the text. Their extractions are below; they may disagree or contain mistakes.\n\n"
+    "{extractions}\n\nWrite one best version of the text{how}. Where they disagree, go with "
+    "what most of them agree on. Don't add anything none of them found.{keep}"
 )
+TOGETHER_PROMPTS = {  # every photo in one call; each section is labeled so readings stay apart
+    "text": "There are {n} images, numbered in the order given. For each one, write \"Image N:\" on its own "
+            "line, then all the text in that image, exactly as written, in reading order. Don't add anything "
+            "that isn't in the images. Reply with only the text.",
+    "markdown": "There are {n} images, numbered in the order given. For each one, start with the heading "
+                "\"## Image N\", then all of its text as Markdown, keeping the layout (headings, lists, tables). "
+                "Don't add anything that isn't in the images. Reply with only the Markdown.",
+    "json": "There are {n} images, numbered in the order given. In \"text\", give each image's text under a "
+            "line \"Image N:\". In \"fields\", list each labeled value you can see, starting each name with "
+            "\"Image N\" (for example \"Image 2 total\"). Don't add anything that isn't in the images.",
+}
 COMBINE_HOW = {"text": ", as plain text. Reply with only the text", "markdown": " as Markdown. Reply with only the Markdown",
                "json": ": all of the text in \"text\", and every labeled value in \"fields\""}
-ACT_PROMPT = "Here is the text from an image:\n\n{text}\n\n{instruction}"
+ACT_PROMPT = "Here is the text from {what}:\n\n{text}\n\n{instruction}"
+STRATEGIES = ["together", "batch", "stream"]
 
 
 def as_text(out, fmt):
@@ -456,54 +469,104 @@ def save_image(image_b64):
     return name
 
 
-def vision(instruction, chain, rule="", on_event=lambda e: None, image_b64="", fmt="text",
-           combiner="granite4.2:8b"):
-    """Fan out, fan in: every model in the chain that can see images extracts the text
-    on its own; then the combiner merges their extractions into one and, if asked,
-    does something with the result."""
-    if not image_b64:
-        raise ValueError("vision mode needs an image")
+def vision(instruction, chain, rule="", on_event=lambda e: None, images=(), fmt="text",
+           combiner="granite4.2:8b", strategy="batch"):
+    """Fan out, fan in: every model in the chain that can see images extracts the text on
+    its own, the combiner merges the readings, and, given an instruction, acts on the result.
+
+    With several photos, strategy picks the order:
+      together  each reader gets every photo in one call; one combine for all of them
+      batch     every reader reads every photo, then the combiner does each photo
+                (fewest model swaps)
+      stream    photo by photo: read it, combine it, then start the next
+                (first result sooner; reloads models each photo if they don't fit together)"""
+    images = [i for i in images if i]
+    if not images:
+        raise ValueError("vision mode needs at least one image")
+    if strategy not in STRATEGIES:
+        raise ValueError(f"unknown strategy {strategy!r}")
     snapshots.clear()
     readers = [m for m in chain if "vision" in capabilities(m)]
     if not readers:
         raise ValueError("none of the models in the chain can see images; add gemma3:4b or a gemma4 model")
+    n, k = len(images), len(readers)
+    if n == 1:
+        strategy = "batch"  # with one photo the three orders are the same
     kind = "extract" if fmt == "json" else "bottom"
-    trace, texts = [], []
+    t0, trace = time.time(), []
+    readings = {}   # (reader, photo) -> text; photo is None for "together"
+    combined = {}   # photo -> text
 
     def step(entry):
+        entry["at"] = round(time.time() - t0, 1)  # when it finished, from the start of the run
         trace.append(entry)
         on_event({"type": "step", **entry})
 
-    for i, model in enumerate(readers):
-        on_event({"type": "call", "dir": "extract", "layer": i, "model": model})
-        out, secs, tps = ask(model, EXTRACT_PROMPTS[fmt], kind, rule, VISION_TOKENS, [image_b64], VISION_CTX)
-        texts.append(as_text(out, fmt))
-        step({"dir": "extract", "layer": i, "model": model, "sent": texts[-1], "format": fmt,
-              "secs": secs, "tok_s": tps, "cut": out["cut"]})
+    def read(i, photo):
+        model = readers[i]
+        on_event({"type": "call", "dir": "extract", "layer": i, "model": model, "photo": photo})
+        if photo is None:
+            prompt, imgs = TOGETHER_PROMPTS[fmt].format(n=n), images
+        else:
+            prompt, imgs = EXTRACT_PROMPTS[fmt], [images[photo]]
+        out, secs, tps = ask(model, prompt, kind, rule, VISION_TOKENS * (n if photo is None else 1), imgs,
+                             VISION_CTX + (n - 1) * 1024 * (photo is None))
+        readings[i, photo] = as_text(out, fmt)
+        step({"dir": "extract", "layer": i, "model": model, "photo": photo, "sent": readings[i, photo],
+              "format": fmt, "secs": secs, "tok_s": tps, "cut": out["cut"], "load": out["load"]})
 
-    k = len(readers)
-    extractions = "\n\n".join(f"--- Extraction {j + 1} ({m}) ---\n{t}" for j, (m, t) in enumerate(zip(readers, texts)))
-    on_event({"type": "call", "dir": "combine", "layer": k, "model": combiner})
-    out, secs, tps = ask(combiner, COMBINE_PROMPT.format(k=k, extractions=extractions, how=COMBINE_HOW[fmt]),
-                         kind, rule, VISION_TOKENS, num_ctx=COMBINE_CTX)
-    combined = as_text(out, fmt)
-    step({"dir": "combine", "layer": k, "model": combiner, "sent": combined, "format": fmt,
-          "secs": secs, "tok_s": tps, "cut": out["cut"]})
+    def combine(photo):
+        texts = [readings[i, photo] for i in range(k)]
+        extractions = "\n\n".join(f"--- Extraction {j + 1} ({m}) ---\n{t}"
+                                   for j, (m, t) in enumerate(zip(readers, texts)))
+        what = f"{n} images" if photo is None else "image"
+        keep = " Keep the \"Image N\" sections." if photo is None else ""
+        on_event({"type": "call", "dir": "combine", "layer": k, "model": combiner, "photo": photo})
+        out, secs, tps = ask(combiner, COMBINE_PROMPT.format(k=k, what=what, extractions=extractions,
+                                                             how=COMBINE_HOW[fmt], keep=keep),
+                             kind, rule, VISION_TOKENS * (n if photo is None else 1), num_ctx=COMBINE_CTX)
+        combined[photo] = as_text(out, fmt)
+        step({"dir": "combine", "layer": k, "model": combiner, "photo": photo, "sent": combined[photo],
+              "format": fmt, "secs": secs, "tok_s": tps, "cut": out["cut"], "load": out["load"]})
 
-    answer = combined
+    if strategy == "together":
+        for i in range(k):
+            read(i, None)
+        combine(None)
+    elif strategy == "batch":
+        for i in range(k):          # each reader does every photo while it's loaded
+            for photo in range(n):
+                read(i, photo)
+        for photo in range(n):
+            combine(photo)
+    else:  # stream
+        for photo in range(n):
+            for i in range(k):
+                read(i, photo)
+            combine(photo)
+
+    photos = [None] if strategy == "together" else list(range(n))
+    joined = combined[None] if strategy == "together" else (
+        combined[0] if n == 1 else "\n\n".join(f"## Photo {p + 1}\n{combined[p]}" for p in photos))
+    answer = joined
     if instruction:
         on_event({"type": "call", "dir": "act", "layer": k, "model": combiner})
-        out, secs, tps = ask(combiner, ACT_PROMPT.format(text=combined, instruction=instruction), "bottom",
-                             rule, VISION_TOKENS, num_ctx=COMBINE_CTX)
+        out, secs, tps = ask(combiner, ACT_PROMPT.format(what="an image" if n == 1 else f"{n} images",
+                                                         text=joined, instruction=instruction),
+                             "bottom", rule, VISION_TOKENS, num_ctx=COMBINE_CTX)
         answer = out["answer"]
         step({"dir": "act", "layer": k, "model": combiner, "sent": answer, "secs": secs, "tok_s": tps,
-              "cut": out["cut"]})
+              "cut": out["cut"], "load": out["load"]})
 
+    reader_text = lambda i: "\n".join(plain(readings[i, p]) for p in photos)
+    names = [save_image(img) for img in images]
     return answer, trace, {
-        "format": fmt, "combiner": combiner, "readers": readers, "combined": combined,
-        "skipped": [m for m in chain if m not in readers], "image": save_image(image_b64),
-        "agreement": [{"model": m, "match": word_match(plain(t), plain(combined))}
-                      for m, t in zip(readers, texts)]}
+        "format": fmt, "combiner": combiner, "readers": readers, "combined": joined, "strategy": strategy,
+        "skipped": [m for m in chain if m not in readers], "images": names, "image": names[0],
+        "first_result": min(t["at"] for t in trace if t["dir"] == "combine"),
+        "load_secs": round(sum(t.get("load", 0) for t in trace), 1),
+        "agreement": [{"model": m, "match": word_match(reader_text(i), "\n".join(plain(combined[p]) for p in photos))}
+                      for i, m in enumerate(readers)]}
 
 
 def blind(task, chain, rule="", on_event=lambda e: None):
@@ -522,7 +585,8 @@ def blind(task, chain, rule="", on_event=lambda e: None):
 
 
 def run(task, chain, mode="relay", rule="", on_event=lambda e: None, save=True,
-        saboteur=None, cipher_name="base64", route=(), image=None, fmt="text", combiner="granite4.2:8b"):
+        saboteur=None, cipher_name="base64", route=(), images=(), fmt="text", combiner="granite4.2:8b",
+        strategy="batch"):
     """Run one relay, blind, cipher or translate pass and return its record, saved to runs/
     unless save=False."""
     start = time.time()
@@ -534,7 +598,7 @@ def run(task, chain, mode="relay", rule="", on_event=lambda e: None, save=True,
     elif mode == "translate":
         answer, trace, extra = translate(task, chain, rule, on_event, route)
     elif mode == "vision":
-        answer, trace, extra = vision(task, chain, rule, on_event, image, fmt, combiner)
+        answer, trace, extra = vision(task, chain, rule, on_event, images, fmt, combiner, strategy)
     else:
         if saboteur is not None and not 0 <= saboteur < len(chain):
             raise ValueError(f"saboteur layer {saboteur + 1} isn't in a {len(chain)}-model chain")
@@ -577,7 +641,8 @@ def list_runs():
             continue
         runs.append({k: r.get(k) for k in ("id", "time", "mode", "task", "rule", "chain", "answer",
                                            "secs", "calls", "cipher", "intact", "sabotage",
-                                           "langs", "match", "format", "combiner", "image", "readers")})
+                                           "langs", "match", "format", "combiner", "image", "images",
+                                           "readers", "strategy")})
     return runs
 
 

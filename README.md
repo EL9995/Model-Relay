@@ -28,7 +28,11 @@ The point is the plumbing and the limits, not solving problems.
   gemma4 models) extracts its text on its own, as plain text, Markdown or JSON with labeled fields.
   A final agent you pick combines the readings and, if you typed an instruction, acts on the result.
   The page shows how closely each reading matches the combined text. Photos are kept in
-  `runs/images/` so saved runs can show them again.
+  `runs/images/` so saved runs can show them again. With several photos (up to 8), a toggle picks
+  the order: **All at once** (each reader gets every photo in one call), **Batch** (every reader
+  reads every photo, then the final agent combines each) or **Photo by photo** (read and combine
+  one photo before starting the next). Each run records when the first result appeared, when it
+  finished, and how long went to loading models.
 
 The chain can be in any order (drag the models on the page, or `--chain`), including smallest on top.
 
@@ -105,3 +109,14 @@ python3 harness.py --show runs/harness/<file>.json   # reprint a scorecard
 - Vision, a cafe receipt read as Markdown by gemma3:4b and gemma4:e2b and combined by granite4.2:8b:
   both readings and the combined text were word-for-word right, and granite turned it into the
   item list with the $26.19 total. About 24 s once the models were loaded.
+- Two receipts, read by gemma3:4b and gemma4:e2b, combined by granite4.2:8b (16.2 GB of models on a
+  16 GB Mac). All three orders got both totals and the sum right:
+
+  | Order          | First result | Total  | Loading models |
+  |----------------|--------------|--------|----------------|
+  | All at once    | 32.5 s       | 34.7 s | 8.1 s          |
+  | Batch          | 26.3 s       | 32.6 s | 7.5 s          |
+  | Photo by photo | 19.4 s       | 39.9 s | 14.4 s         |
+
+  Photo by photo shows something first but finishes last, because the models don't fit in memory
+  together and reload for every photo.
