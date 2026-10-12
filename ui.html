@@ -454,7 +454,26 @@ const MODES = {
             chain: "Models marked “reads” see the photo. The rest are skipped as readers, but any of them can be the final agent." },
 };
 const FMT = { text: "plain text", markdown: "Markdown", json: "JSON" };
+// ---- each tab keeps its own chain, remembered in this browser ----
+const CHAINS_KEY = "model-relay:chains";
+let chains = {}, defaultChain = [];
+function chainFor(m) {
+  const ok = n => installed.some(x => x.name === n);
+  if (chains[m]?.some(ok)) return chains[m].filter(ok);
+  if (m === "vision") {  // start Vision with the models that can see images, smallest first
+    const seeing = installed.filter(x => x.vision).sort((a, b) => a.gb - b.gb).map(x => x.name);
+    if (seeing.length) return seeing.slice(0, 2);
+  }
+  return defaultChain.length ? [...defaultChain] : installed.slice(0, 1).map(x => x.name);
+}
+function saveChains() {
+  if (!installed.length) return;  // models not loaded yet; don't overwrite what's saved
+  chains[current] = chain;
+  try { localStorage.setItem(CHAINS_KEY, JSON.stringify(chains)); } catch {}
+}
+
 function setMode(m) {
+  if (installed.length) { chains[current] = chain; chain = chainFor(m); }
   current = m;
   document.querySelectorAll(".tabs button").forEach(b => b.setAttribute("aria-selected", b.dataset.mode === m));
   $("#hint").textContent = MODES[m].hint;
@@ -482,6 +501,7 @@ function remove(i) {
 const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
 let settling = false;
 function renderChain() {
+  saveChains();
   $("#chainHint").textContent = MODES[current].chain;
   while (route.length < chain.length - 1) route.push(defaultRoute[route.length % defaultRoute.length] || "Spanish");
   renderRoute();
@@ -918,8 +938,8 @@ async function openRun(id) {
   saboteur = r.saboteur != null ? r.chain[r.saboteur] : null;
   const missing = r.chain.filter(n => !installed.some(m => m.name === n));
   if (missing.length) warn("Not installed any more: " + missing.join(", "));
-  else chain = [...r.chain];
-  setMode(r.mode);
+  setMode(r.mode);  // switch tabs first, so the run's chain lands in its own tab
+  if (!missing.length) { chain = [...r.chain]; renderChain(); }
   if (r.mode === "vision") renderStage(r.task, r.rule, [...r.readers, r.combiner], r.mode, null, [], imgUrls);
   else renderStage(r.task, r.rule, r.chain, r.mode, r.saboteur ?? null, r.langs);
   if (r.mode === "cipher") handle({ type: "start", cipher: r.ciphers[0], sent: r.encoded });
@@ -934,8 +954,9 @@ fetch("/models").then(r => r.json()).then(d => {
   if (d.error) return warn(d.error);
   installed = d.models; ramGb = d.ram_gb || 0;
   languages = d.languages || []; defaultRoute = d.route || [];
-  chain = d.default.filter(n => installed.some(m => m.name === n));
-  if (!chain.length && installed.length) chain = [installed[0].name];
+  defaultChain = d.default.filter(n => installed.some(m => m.name === n));
+  try { chains = JSON.parse(localStorage.getItem(CHAINS_KEY)) || {}; } catch { chains = {}; }
+  chain = chainFor(current);
   renderChain();
   loadHistory();
 }).catch(() => warn("Can't reach server.py. Start it with: python3 server.py"));
