@@ -112,7 +112,13 @@
   .strat button + button { border-left: 1px solid var(--line); }
   .strat button[aria-pressed=true] { background: var(--teal); color: #fff; }
   .shint { font-size: 12px; color: var(--muted); margin: 6px 0 0; }
-  .fieldsbox { border-top: 1px solid var(--line); margin: 4px 0 12px; padding-top: 12px; }
+  .extract { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px;
+             margin-bottom: 10px; }
+  .extract[hidden] { display: none; }
+  .extract .field { margin-bottom: 0; }
+  .strat.fmt button[aria-pressed=true] { background: var(--accent); }
+  .fieldsbox { border-top: 1px solid var(--line); margin: 12px 0 0; padding-top: 12px; }
+  #fieldList { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 0 10px; }
   .fieldsbox[hidden] { display: none; }
   .frow { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 6px; margin-bottom: 6px; }
   .frow input { font: inherit; font-size: 13px; padding: 5px 8px; border-radius: 6px; min-width: 0;
@@ -282,6 +288,30 @@
       </div>
       <input type="file" id="imgfile" accept="image/*" multiple hidden>
     </div>
+    <div class="extract" id="extractBox" hidden>
+    <div class="field"><span>What to pull out of the photo</span>
+      <div class="strat fmt" role="group" aria-label="What to pull out of the photo">
+        <button type="button" data-format="text">All text</button>
+        <button type="button" data-format="markdown">Markdown</button>
+        <button type="button" data-format="json">JSON</button>
+        <button type="button" data-format="fields">Custom fields</button>
+      </div>
+      <input type="hidden" id="format" value="text">
+      <p class="shint" id="fmtHint"></p>
+    </div>
+    <div class="fieldsbox" id="fieldsBox" hidden>
+      <p class="phint" style="margin-top:0">Fill in the fields you want the models to pull from the photo. Each model
+        fills them in on its own and leaves a field empty if it isn't there. Then the most common answer wins, field
+        by field, and you can see how each model did.</p>
+      <label class="field"><span>Start from a preset</span>
+        <select id="preset" style="width:100%"></select>
+      </label>
+      <div id="fieldList"></div>
+      <div class="fbtns">
+        <button type="button" class="ghost" id="addField">+ Add a field</button>
+      </div>
+    </div>
+    </div>
     <div class="prompt">
       <textarea id="task" rows="2" aria-label="Prompt"></textarea>
       <div class="pfoot">
@@ -327,26 +357,6 @@
     <section class="panel" id="visionPanel" hidden>
       <div class="phead"><h2>Vision</h2></div>
       <p class="phint">Each model that can see images reads the photo on its own. The final agent combines what they found, then does what you typed, if anything.</p>
-      <label class="field"><span>Extract the text as</span>
-        <select id="format" style="width:100%">
-          <option value="text">Plain text</option>
-          <option value="markdown">Markdown (keeps headings and tables)</option>
-          <option value="json">JSON (text plus labeled fields)</option>
-          <option value="fields">Custom fields (you choose what to pull out)</option>
-        </select>
-      </label>
-      <div class="fieldsbox" id="fieldsBox" hidden>
-        <p class="phint" style="margin-top:0">Fill in the fields you want the models to pull from the photo. Each model
-          fills them in on its own and leaves a field empty if it isn't there. Then the most common answer wins, field
-          by field, and you can see how each model did.</p>
-        <label class="field"><span>Start from a preset</span>
-          <select id="preset" style="width:100%"></select>
-        </label>
-        <div id="fieldList"></div>
-        <div class="fbtns">
-          <button type="button" class="ghost" id="addField">+ Add a field</button>
-        </div>
-      </div>
       <label class="field"><span>Final agent</span>
         <select id="combiner" style="width:100%"></select>
       </label>
@@ -456,7 +466,7 @@ const STRAT = {
 };
 let strategy = "batch";
 function renderStrategy() {
-  document.querySelectorAll(".strat button").forEach(b => b.setAttribute("aria-pressed", b.dataset.strategy === strategy));
+  document.querySelectorAll(".strat [data-strategy]").forEach(b => b.setAttribute("aria-pressed", b.dataset.strategy === strategy));
   const readers = chain.filter(n => (installed.find(x => x.name === n) || {}).vision);
   const need = [...new Set([...readers, $("#combiner").value])].reduce((t, n) => t + gb(n), 0);
   const tight = strategy === "stream" && ramGb && need > ramGb * 0.6;
@@ -465,7 +475,7 @@ function renderStrategy() {
     (tight ? ` These models (${need.toFixed(1)} GB) don't all fit in memory together, so they'll reload for every photo.` : "");
   $("#stratHint").classList.toggle("tight", !!tight);
 }
-document.querySelectorAll(".strat button").forEach(b => b.onclick = () => { strategy = b.dataset.strategy; renderStrategy(); });
+document.querySelectorAll(".strat [data-strategy]").forEach(b => b.onclick = () => { strategy = b.dataset.strategy; renderStrategy(); });
 $("#combiner").onchange = () => renderStrategy();
 
 // ---- modes ----
@@ -520,8 +530,22 @@ $("#addField").onclick = () => { fieldSpec.push({ name: "", type: "text" }); sav
                                  $("#fieldList").lastChild.querySelector("input").focus(); };
 $("#preset").onchange = e => { if (!e.target.value) return;
   fieldSpec = PRESETS[e.target.value].map(([name, type]) => ({ name, type })); saveFields(); renderFields(); };
-$("#format").onchange = () => { $("#fieldsBox").hidden = $("#format").value !== "fields"; renderStrategy(); };
+const FMT_HINTS = {
+  text: "Every model writes out all the text it can read.",
+  markdown: "All the text, keeping headings, lists and tables.",
+  json: "All the text, plus whatever labeled values each model spots on its own.",
+  fields: "Only the fields you list below. Best for comparing models: every answer lines up field by field.",
+};
+function setFormat(f) {
+  $("#format").value = f;
+  document.querySelectorAll(".strat.fmt button").forEach(b => b.setAttribute("aria-pressed", b.dataset.format === f));
+  $("#fmtHint").textContent = FMT_HINTS[f];
+  $("#fieldsBox").hidden = f !== "fields";
+  renderStrategy();
+}
+document.querySelectorAll(".strat.fmt button").forEach(b => b.onclick = () => setFormat(b.dataset.format));
 renderFields();
+setFormat("text");
 
 // the cards a vision run gets: readers, then the combiner, or with fields the vote (and the final agent if asked)
 function visionCards(readers, fmt, combiner, asked) {
@@ -558,6 +582,7 @@ function setMode(m) {
   $("#translatePanel").hidden = m !== "translate";
   $("#visionPanel").hidden = m !== "vision";
   $("#imgzone").hidden = m !== "vision";
+  $("#extractBox").hidden = m !== "vision";
   renderChain();
 }
 document.querySelectorAll(".tabs button").forEach(b => b.onclick = () => setMode(b.dataset.mode));
@@ -1052,7 +1077,7 @@ async function openRun(id) {
   grow($("#task"), 260); grow($("#rule"), 120);
   if (r.cipher) $("#cipher").value = r.cipher;
   if (r.langs) route = r.langs.slice(0, -1);
-  if (r.format) { $("#format").value = r.format; $("#fieldsBox").hidden = r.format !== "fields"; }
+  if (r.format) setFormat(r.format);
   if (r.fields) { fieldSpec = r.fields.map(f => ({ ...f })); saveFields(); renderFields(); }
   if (r.combiner) renderCombiner(r.combiner);
   const imgUrls = (r.images || (r.image ? [r.image] : [])).map(n => "/images/" + n);
