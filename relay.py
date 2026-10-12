@@ -92,7 +92,7 @@ def post(path, body):
         return json.load(r)
 
 
-def ask(model, prompt, kind, rule="", max_tokens=MAX_TOKENS, images=None, num_ctx=NUM_CTX):
+def ask(model, prompt, kind, rule="", max_tokens=MAX_TOKENS, images=None, num_ctx=NUM_CTX, schema=None):
     """One call to one model. The bottom model replies in plain text, because
     forcing JSON on a 1B model sends it into loops; the others reply in JSON.
     A rule, if given, goes in as the system prompt. images are base64 strings."""
@@ -104,7 +104,7 @@ def ask(model, prompt, kind, rule="", max_tokens=MAX_TOKENS, images=None, num_ct
     if images:
         body["images"] = images
     if kind != "bottom":
-        body["format"] = SCHEMAS[kind]
+        body["format"] = schema or SCHEMAS[kind]
     start = time.time()
     try:
         r = post("/api/generate", body)
@@ -408,7 +408,7 @@ def capabilities(model):
     return _caps[model]
 
 
-FORMATS = ["text", "markdown", "json"]
+FORMATS = ["text", "markdown", "json", "fields"]
 EXTRACT_PROMPTS = {
     "text": "Read this image and write out all the text in it, exactly as written, in reading order. "
             "Keep the line breaks. Don't add anything that isn't in the image. Reply with only the text.",
@@ -441,6 +441,71 @@ COMBINE_HOW = {"text": ", as plain text. Reply with only the text", "markdown": 
 ACT_PROMPT = "Here is the text from {what}:\n\n{text}\n\n{instruction}"
 STRATEGIES = ["together", "batch", "stream"]
 
+FIELD_TYPES = {"text": "text", "number": "a number", "date": "a date, as written", "money": "an amount of money, as written",
+               "list": "a list, one entry per item"}
+FIELDS_PROMPT = (
+    "Read this image and fill in each field below from what the image says.\n{fields}\n\n"
+    "Copy values exactly as they appear. If a field isn't in the image, leave it as an empty string "
+    "(or an empty list). Don't guess or make anything up."
+)
+
+
+def clean_fields(fields):
+    """[{name, type}], without blanks or repeats; unknown types become text."""
+    out, seen = [], set()
+    for f in fields or []:
+        name = " ".join(str(f.get("name", "")).split())[:60]
+        if name and name.lower() not in seen:
+            seen.add(name.lower())
+            out.append({"name": name, "type": f.get("type") if f.get("type") in FIELD_TYPES else "text"})
+    return out
+
+
+def field_schema(fields):
+    props = {f["name"]: {"type": "array", "items": {"type": "string"}} if f["type"] == "list" else {"type": "string"}
+             for f in fields}
+    return {"type": "object", "properties": props, "required": [f["name"] for f in fields]}
+
+
+def field_key(value, ftype):
+    """A value in a form where equal readings compare equal; None when the field is empty."""
+    if isinstance(value, list):
+        items = sorted(norm(x) for x in value if str(x).strip())
+        return tuple(items) or None
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if ftype in ("number", "money"):
+        digits = re.sub(r"[^\d.\-]", "", text.replace(",", ""))
+        try:
+            return f"{float(digits):g}"
+        except ValueError:
+            return norm(text)
+    return norm(text)
+
+
+def vote(fields, readings):
+    """readings: {model: {field: value}}. For each field, the value most readers gave."""
+    grid = {}
+    for f in fields:
+        name, ftype = f["name"], f["type"]
+        values = {m: r.get(name, "") for m, r in readings.items()}
+        keys = {m: field_key(v, ftype) for m, v in values.items()}
+        counts = {}
+        for k in keys.values():
+            if k is not None:
+                counts[k] = counts.get(k, 0) + 1
+        if counts:
+            top = max(counts.values())
+            best = next(k for k in keys.values() if counts.get(k) == top)  # first reader's, on a tie
+            chosen = next(values[m] for m in values if keys[m] == best)
+            tie = sum(c == top for c in counts.values()) > 1
+        else:
+            best, chosen, top, tie = None, [] if ftype == "list" else "", len(values), False
+        grid[name] = {"values": values, "match": {m: keys[m] == best for m in values},
+                      "chosen": chosen, "agree": top, "tie": tie, "found": best is not None}
+    return grid
+
 
 def as_text(out, fmt):
     """A model's extraction as one string; JSON comes back pretty-printed."""
@@ -470,7 +535,7 @@ def save_image(image_b64):
 
 
 def vision(instruction, chain, rule="", on_event=lambda e: None, images=(), fmt="text",
-           combiner="granite4.2:8b", strategy="batch"):
+           combiner="granite4.2:8b", strategy="batch", fields=()):
     """Fan out, fan in: every model in the chain that can see images extracts the text on
     its own, the combiner merges the readings, and, given an instruction, acts on the result.
 
@@ -479,7 +544,10 @@ def vision(instruction, chain, rule="", on_event=lambda e: None, images=(), fmt=
       batch     every reader reads every photo, then the combiner does each photo
                 (fewest model swaps)
       stream    photo by photo: read it, combine it, then start the next
-                (first result sooner; reloads models each photo if they don't fit together)"""
+                (first result sooner; reloads models each photo if they don't fit together)
+
+    With fmt "fields", readers fill in only the given fields and code picks each field's
+    value by majority vote, so nothing is added at the combining step."""
     images = [i for i in images if i]
     if not images:
         raise ValueError("vision mode needs at least one image")
@@ -490,9 +558,14 @@ def vision(instruction, chain, rule="", on_event=lambda e: None, images=(), fmt=
     if not readers:
         raise ValueError("none of the models in the chain can see images; add gemma3:4b or a gemma4 model")
     n, k = len(images), len(readers)
-    if n == 1:
-        strategy = "batch"  # with one photo the three orders are the same
-    kind = "extract" if fmt == "json" else "bottom"
+    fields = clean_fields(fields)
+    if fmt == "fields" and not fields:
+        raise ValueError("add at least one field to fill in")
+    if n == 1 or (fmt == "fields" and strategy == "together"):
+        strategy = "batch"  # one photo: the orders are the same; fields are filled in per photo
+    kind = {"json": "extract", "fields": "fields"}.get(fmt, "bottom")
+    schema = field_schema(fields) if fmt == "fields" else None
+    grids = {}      # photo -> vote results, for fields
     t0, trace = time.time(), []
     readings = {}   # (reader, photo) -> text; photo is None for "together"
     combined = {}   # photo -> text
@@ -507,15 +580,31 @@ def vision(instruction, chain, rule="", on_event=lambda e: None, images=(), fmt=
         on_event({"type": "call", "dir": "extract", "layer": i, "model": model, "photo": photo})
         if photo is None:
             prompt, imgs = TOGETHER_PROMPTS[fmt].format(n=n), images
+        elif fmt == "fields":
+            prompt = FIELDS_PROMPT.format(fields="\n".join(f"- {f['name']} ({FIELD_TYPES[f['type']]})" for f in fields))
+            imgs = [images[photo]]
         else:
             prompt, imgs = EXTRACT_PROMPTS[fmt], [images[photo]]
         out, secs, tps = ask(model, prompt, kind, rule, VISION_TOKENS * (n if photo is None else 1), imgs,
-                             VISION_CTX + (n - 1) * 1024 * (photo is None))
-        readings[i, photo] = as_text(out, fmt)
+                             VISION_CTX + (n - 1) * 1024 * (photo is None), schema)
+        if fmt == "fields":
+            got = {f["name"]: out.get(f["name"], [] if f["type"] == "list" else "") for f in fields}
+            readings[i, photo] = json.dumps(got, indent=2, ensure_ascii=False)
+        else:
+            readings[i, photo] = as_text(out, fmt)
         step({"dir": "extract", "layer": i, "model": model, "photo": photo, "sent": readings[i, photo],
               "format": fmt, "secs": secs, "tok_s": tps, "cut": out["cut"], "load": out["load"]})
 
+    def tally(photo):  # fields: code votes, no model
+        on_event({"type": "call", "dir": "vote", "layer": k, "model": "majority vote", "photo": photo})
+        grids[photo] = vote(fields, {readers[i]: json.loads(readings[i, photo]) for i in range(k)})
+        combined[photo] = json.dumps({f: g["chosen"] for f, g in grids[photo].items()}, indent=2, ensure_ascii=False)
+        step({"dir": "vote", "layer": k, "model": "majority vote", "photo": photo, "sent": combined[photo],
+              "format": fmt, "grid": grids[photo], "secs": 0, "tok_s": 0})
+
     def combine(photo):
+        if fmt == "fields":
+            return tally(photo)
         texts = [readings[i, photo] for i in range(k)]
         extractions = "\n\n".join(f"--- Extraction {j + 1} ({m}) ---\n{t}"
                                    for j, (m, t) in enumerate(zip(readers, texts)))
@@ -549,24 +638,30 @@ def vision(instruction, chain, rule="", on_event=lambda e: None, images=(), fmt=
     joined = combined[None] if strategy == "together" else (
         combined[0] if n == 1 else "\n\n".join(f"## Photo {p + 1}\n{combined[p]}" for p in photos))
     answer = joined
+    act_layer = k + 1 if fmt == "fields" else k  # with fields the vote has its own card
     if instruction:
-        on_event({"type": "call", "dir": "act", "layer": k, "model": combiner})
+        on_event({"type": "call", "dir": "act", "layer": act_layer, "model": combiner})
         out, secs, tps = ask(combiner, ACT_PROMPT.format(what="an image" if n == 1 else f"{n} images",
                                                          text=joined, instruction=instruction),
                              "bottom", rule, VISION_TOKENS, num_ctx=COMBINE_CTX)
         answer = out["answer"]
-        step({"dir": "act", "layer": k, "model": combiner, "sent": answer, "secs": secs, "tok_s": tps,
+        step({"dir": "act", "layer": act_layer, "model": combiner, "sent": answer, "secs": secs, "tok_s": tps,
               "cut": out["cut"], "load": out["load"]})
 
     reader_text = lambda i: "\n".join(plain(readings[i, p]) for p in photos)
     names = [save_image(img) for img in images]
+    if fmt == "fields":  # agreement: the share of fields where a reader matched the vote
+        cells = lambda m: [g["match"][m] for p in photos for g in grids[p].values()]
+        agreement = [{"model": m, "match": round(sum(cells(m)) / len(cells(m)), 2)} for m in readers]
+    else:
+        agreement = [{"model": m, "match": word_match(reader_text(i), "\n".join(plain(combined[p]) for p in photos))}
+                     for i, m in enumerate(readers)]
     return answer, trace, {
         "format": fmt, "combiner": combiner, "readers": readers, "combined": joined, "strategy": strategy,
         "skipped": [m for m in chain if m not in readers], "images": names, "image": names[0],
-        "first_result": min(t["at"] for t in trace if t["dir"] == "combine"),
-        "load_secs": round(sum(t.get("load", 0) for t in trace), 1),
-        "agreement": [{"model": m, "match": word_match(reader_text(i), "\n".join(plain(combined[p]) for p in photos))}
-                      for i, m in enumerate(readers)]}
+        "first_result": min(t["at"] for t in trace if t["dir"] in ("combine", "vote")),
+        "load_secs": round(sum(t.get("load", 0) for t in trace), 1), "agreement": agreement,
+        **({"fields": fields, "grids": [grids[p] for p in photos]} if fmt == "fields" else {})}
 
 
 def blind(task, chain, rule="", on_event=lambda e: None):
@@ -586,7 +681,7 @@ def blind(task, chain, rule="", on_event=lambda e: None):
 
 def run(task, chain, mode="relay", rule="", on_event=lambda e: None, save=True,
         saboteur=None, cipher_name="base64", route=(), images=(), fmt="text", combiner="granite4.2:8b",
-        strategy="batch"):
+        strategy="batch", fields=()):
     """Run one relay, blind, cipher or translate pass and return its record, saved to runs/
     unless save=False."""
     start = time.time()
@@ -598,7 +693,7 @@ def run(task, chain, mode="relay", rule="", on_event=lambda e: None, save=True,
     elif mode == "translate":
         answer, trace, extra = translate(task, chain, rule, on_event, route)
     elif mode == "vision":
-        answer, trace, extra = vision(task, chain, rule, on_event, images, fmt, combiner, strategy)
+        answer, trace, extra = vision(task, chain, rule, on_event, images, fmt, combiner, strategy, fields)
     else:
         if saboteur is not None and not 0 <= saboteur < len(chain):
             raise ValueError(f"saboteur layer {saboteur + 1} isn't in a {len(chain)}-model chain")
@@ -614,7 +709,8 @@ def run(task, chain, mode="relay", rule="", on_event=lambda e: None, save=True,
 def save_run(record):
     RUNS.mkdir(exist_ok=True)
     stamp = time.strftime("%Y-%m-%d_%H%M%S")
-    slug = re.sub(r"[^a-z0-9]+", "-", (record["task"] or record["mode"]).lower()).strip("-")[:40].strip("-") or "run"
+    name = record["task"] or f"{record['mode']} {record.get('format', '')}"  # e.g. "vision fields"
+    slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:40].strip("-") or "run"
     rid, n = f"{stamp}_{slug}", 2
     while (RUNS / f"{rid}.json").exists():
         rid, n = f"{stamp}_{slug}-{n}", n + 1

@@ -112,6 +112,25 @@
   .strat button + button { border-left: 1px solid var(--line); }
   .strat button[aria-pressed=true] { background: var(--teal); color: #fff; }
   .shint { font-size: 12px; color: var(--muted); margin: 6px 0 0; }
+  .fieldsbox { border-top: 1px solid var(--line); margin: 4px 0 12px; padding-top: 12px; }
+  .fieldsbox[hidden] { display: none; }
+  .frow { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 6px; margin-bottom: 6px; }
+  .frow input { font: inherit; font-size: 13px; padding: 5px 8px; border-radius: 6px; min-width: 0;
+                border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
+  .frow select { font-size: 12px; padding: 4px; }
+  .frow button { background: none; color: var(--muted); padding: 0 6px; font-weight: 400; }
+  .fbtns { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .gridwrap { overflow-x: auto; margin-top: 10px; }
+  table.grid { border-collapse: collapse; width: 100%; font-size: 13px; }
+  table.grid th, table.grid td { text-align: left; vertical-align: top; padding: 6px 8px;
+                                 border-bottom: 1px solid var(--line); }
+  table.grid th { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted);
+                  font-weight: 600; white-space: nowrap; }
+  table.grid td:first-child { font-weight: 600; white-space: nowrap; }
+  table.grid td.off { background: var(--bad-soft); color: var(--bad); }
+  table.grid td.vote { font-weight: 600; }
+  table.grid .nf { color: var(--muted); font-style: italic; font-weight: 400; }
+  .photohead { font-size: 13px; font-weight: 600; margin-top: 14px; }
   .shint.tight { color: var(--warn); }
   .imgzone .what { flex: 1; min-width: 0; font-size: 13px; color: var(--muted); }
   .imgzone .what b { display: block; color: var(--ink); font-size: 14px; overflow: hidden;
@@ -313,8 +332,21 @@
           <option value="text">Plain text</option>
           <option value="markdown">Markdown (keeps headings and tables)</option>
           <option value="json">JSON (text plus labeled fields)</option>
+          <option value="fields">Custom fields (you choose what to pull out)</option>
         </select>
       </label>
+      <div class="fieldsbox" id="fieldsBox" hidden>
+        <p class="phint" style="margin-top:0">Fill in the fields you want the models to pull from the photo. Each model
+          fills them in on its own and leaves a field empty if it isn't there. Then the most common answer wins, field
+          by field, and you can see how each model did.</p>
+        <label class="field"><span>Start from a preset</span>
+          <select id="preset" style="width:100%"></select>
+        </label>
+        <div id="fieldList"></div>
+        <div class="fbtns">
+          <button type="button" class="ghost" id="addField">+ Add a field</button>
+        </div>
+      </div>
       <label class="field"><span>Final agent</span>
         <select id="combiner" style="width:100%"></select>
       </label>
@@ -429,6 +461,7 @@ function renderStrategy() {
   const need = [...new Set([...readers, $("#combiner").value])].reduce((t, n) => t + gb(n), 0);
   const tight = strategy === "stream" && ramGb && need > ramGb * 0.6;
   $("#stratHint").textContent = STRAT[strategy].hint + (images.length === 1 ? " (With one photo, all three work the same.)" : "") +
+    ($("#format").value === "fields" && strategy === "together" ? " Custom fields are filled in per photo, so this runs as Batch." : "") +
     (tight ? ` These models (${need.toFixed(1)} GB) don't all fit in memory together, so they'll reload for every photo.` : "");
   $("#stratHint").classList.toggle("tight", !!tight);
 }
@@ -453,7 +486,50 @@ const MODES = {
             placeholder: "Optional: what the final agent should do with the text, e.g. List what I bought and the total.",
             chain: "Models marked “reads” see the photo. The rest are skipped as readers, but any of them can be the final agent." },
 };
-const FMT = { text: "plain text", markdown: "Markdown", json: "JSON" };
+const FMT = { text: "plain text", markdown: "Markdown", json: "JSON", fields: "custom fields" };
+const FIELD_TYPES = ["text", "number", "date", "money", "list"];
+const PRESETS = {
+  "Receipt": [["store", "text"], ["date", "date"], ["items", "list"], ["subtotal", "money"], ["tax", "money"], ["total", "money"]],
+  "Business card": [["name", "text"], ["job title", "text"], ["company", "text"], ["phone", "text"], ["email", "text"], ["website", "text"]],
+  "Event flyer": [["event", "text"], ["date", "date"], ["time", "text"], ["place", "text"], ["price", "money"]],
+  "Book cover": [["title", "text"], ["author", "text"], ["publisher", "text"]],
+  "Nutrition label": [["serving size", "text"], ["calories", "number"], ["total fat", "text"], ["sodium", "text"], ["protein", "text"]],
+};
+const FIELDS_KEY = "model-relay:fields";
+let fieldSpec;
+try { fieldSpec = JSON.parse(localStorage.getItem(FIELDS_KEY)); } catch {}
+if (!Array.isArray(fieldSpec) || !fieldSpec.length) fieldSpec = PRESETS.Receipt.map(([name, type]) => ({ name, type }));
+function saveFields() { try { localStorage.setItem(FIELDS_KEY, JSON.stringify(fieldSpec)); } catch {} }
+function renderFields() {
+  const list = $("#fieldList"); list.replaceChildren();
+  fieldSpec.forEach((f, i) => {
+    const row = el("div", "frow"), name = el("input"), type = el("select"), x = el("button", null, "✕");
+    name.value = f.name; name.placeholder = "field name, e.g. total"; name.setAttribute("aria-label", `Field ${i + 1} name`);
+    name.oninput = () => { f.name = name.value; saveFields(); };
+    FIELD_TYPES.forEach(t => { const o = el("option", null, t); o.value = t; type.append(o); });
+    type.value = f.type; type.setAttribute("aria-label", `Field ${i + 1} type`);
+    type.onchange = () => { f.type = type.value; saveFields(); };
+    x.type = "button"; x.title = "Remove this field"; x.disabled = fieldSpec.length < 2;
+    x.onclick = () => { fieldSpec.splice(i, 1); saveFields(); renderFields(); };
+    row.append(name, type, x); list.append(row);
+  });
+  const ps = $("#preset"), none = el("option", null, "Pick a preset…"); none.value = "";
+  ps.replaceChildren(none, ...Object.keys(PRESETS).map(n => { const o = el("option", null, n); o.value = n; return o; }));
+}
+$("#addField").onclick = () => { fieldSpec.push({ name: "", type: "text" }); saveFields(); renderFields();
+                                 $("#fieldList").lastChild.querySelector("input").focus(); };
+$("#preset").onchange = e => { if (!e.target.value) return;
+  fieldSpec = PRESETS[e.target.value].map(([name, type]) => ({ name, type })); saveFields(); renderFields(); };
+$("#format").onchange = () => { $("#fieldsBox").hidden = $("#format").value !== "fields"; renderStrategy(); };
+renderFields();
+
+// the cards a vision run gets: readers, then the combiner, or with fields the vote (and the final agent if asked)
+function visionCards(readers, fmt, combiner, asked) {
+  if (fmt !== "fields") return { names: [...readers, combiner], roles: null };
+  return { names: [...readers, "majority vote", ...(asked ? [combiner] : [])],
+           roles: [...readers.map(() => "fills in the fields"), "picks each field's most common answer (code, no model)",
+                   ...(asked ? ["does what you asked"] : [])] };
+}
 // ---- each tab keeps its own chain, remembered in this browser ----
 const CHAINS_KEY = "model-relay:chains";
 let chains = {}, defaultChain = [];
@@ -630,7 +706,7 @@ function drag(e, row, from) {
 
 // ---- the stage: You at the top, one card per model, a wire above each card ----
 let nodes = [], wires = [], you, planted = null;
-function renderStage(task, rule, runChain, runMode, sabLayer, langs = [], imgUrls = []) {
+function renderStage(task, rule, runChain, runMode, sabLayer, langs = [], imgUrls = [], roles = null) {
   const stage = $("#stage"); stage.replaceChildren(); nodes = []; wires = []; planted = null;
   const bar = el("div", "stagebar");
   const all = (fold, text) => { const b = el("button", "ghost", text); b.type = "button";
@@ -658,7 +734,7 @@ function renderStage(task, rule, runChain, runMode, sabLayer, langs = [], imgUrl
   runChain.forEach((name, i) => {
     const w = el("div", "wire"); w.append(el("i")); wires.push(w); stage.append(w);
     const bottom = i === runChain.length - 1;
-    const role = { relay: bottom ? "answers" : "rewrites ↓ · checks ↑", blind: "answers on its own",
+    const role = roles?.[i] ?? { relay: bottom ? "answers" : "rewrites ↓ · checks ↑", blind: "answers on its own",
                    cipher: bottom ? "decodes" : "decodes · re-encodes ↓",
                    translate: bottom ? "translates back to English" : `translates into ${langs[i]}`,
                    vision: bottom ? "combines the readings" : "reads the photo" }[runMode];
@@ -681,6 +757,27 @@ function setFolded(n, fold) {
   n.classList.toggle("collapsed", fold);
   n.fold.setAttribute("aria-expanded", String(!fold));
   n.fold.setAttribute("aria-label", (fold ? "Expand" : "Collapse") + n.fold.getAttribute("aria-label").replace(/^\w+/, ""));
+}
+
+function fieldGrid(grid, readers) {
+  const show = v => Array.isArray(v) ? v.join(", ") : String(v ?? "");
+  const t = el("table", "grid"), head = el("tr");
+  head.append(el("th", null, "Field"), ...readers.map(m => el("th", null, m)), el("th", null, "Most common"));
+  t.append(head);
+  Object.entries(grid).forEach(([name, g]) => {
+    const tr = el("tr"); tr.append(el("td", null, name));
+    readers.forEach(m => {
+      const v = show(g.values[m]), td = el("td", g.match[m] ? null : "off");
+      if (v) td.textContent = v; else td.append(el("span", "nf", "empty"));
+      if (!g.match[m]) td.title = "Differs from the most common answer";
+      tr.append(td);
+    });
+    const vote = el("td", "vote");
+    if (!g.found) vote.append(el("span", "nf", "not in the photo"));
+    else { vote.textContent = show(g.chosen); vote.append(el("span", "nf", ` ${g.agree}/${readers.length}${g.tie ? ", tie" : ""}`)); }
+    tr.append(vote); t.append(tr);
+  });
+  const w = el("div", "gridwrap"); w.append(t); return w;
 }
 
 function addMsg(n, cls, label, meta, text, opts) {  // for cards that collect several messages
@@ -724,7 +821,8 @@ function handle(e) {
     if (e.dir === "translate") { flow(e.layer, "down"); busy(e.layer, `translating into ${e.lang}…`); }
     if (e.dir === "extract") { flow(e.layer, "down"); busy(e.layer, `reading ${photoName(e.photo)}…`); }
     if (e.dir === "combine") { flow(e.layer, "down"); busy(e.layer, `combining the readings of ${photoName(e.photo)}…`); }
-    if (e.dir === "act") { busy(e.layer, "doing what you asked…"); }
+    if (e.dir === "act") { flow(e.layer, "down"); busy(e.layer, "doing what you asked…"); }
+    if (e.dir === "vote") { flow(e.layer, "down"); busy(e.layer, "counting the answers…"); }
   } else if (e.type === "step") {
     const meta = `${e.secs}s · ${e.tok_s} tok/s` + (e.cut ? " · cut off at the token limit" : "");
     if (e.dir === "down") { fill(n.down, "↓ told the model below", meta, e.sent); n.status.textContent = "waiting for the answer"; }
@@ -754,8 +852,15 @@ function handle(e) {
     }
     const when = (e.load >= 0.5 ? ` · ${e.load}s loading` : "") + (e.at != null ? ` · done at ${e.at}s` : "");
     if (e.dir === "extract" || e.dir === "combine") {
-      addMsg(n, "down", `${e.dir === "extract" ? "◉ read" : "⇢ combined"} ${photoName(e.photo)} · ${FMT[e.format]}`,
+      const verb = e.dir === "combine" ? "⇢ combined" : e.format === "fields" ? "◉ filled in" : "◉ read";
+      addMsg(n, "down", `${verb} ${photoName(e.photo)}` + (e.format === "fields" ? "" : ` · ${FMT[e.format]}`),
              meta + when, e.sent, { code: e.format !== "text" });
+      n.status.textContent = "done";
+    }
+    if (e.dir === "vote") {
+      const split = Object.values(e.grid).filter(g => g.found && g.agree < Object.keys(g.values).length).length;
+      addMsg(n, "down", `⇢ ${photoName(e.photo)} · most common answers`, (split ? `${split} field${split > 1 ? "s" : ""} split` : "all agreed") + when,
+             e.sent, { code: true });
       n.status.textContent = "done";
     }
     if (e.dir === "act") { addMsg(n, "up", "→ did what you asked", meta + when, e.sent); n.status.textContent = "done"; }
@@ -788,6 +893,19 @@ function finish(e) {
   if (e.mode === "blind") {
     parts.push(lbl("Done"), el("div", "stats",
       `${e.calls} models answered in ${e.secs}s · at most ${e.peak.length} in memory at once · compare their answers below`));
+  } else if (e.mode === "vision" && e.format === "fields") {
+    const asked = e.answer !== e.combined;
+    if (asked) parts.push(lbl("Final agent's answer"), el("div", "txt", e.answer));
+    parts.push(lbl("Field by field"));
+    (e.grids || []).forEach((g, p) => {
+      if (e.grids.length > 1) parts.push(el("div", "photohead", `Photo ${p + 1}`));
+      parts.push(fieldGrid(g, e.readers));
+    });
+    const ag = el("div", "agree");
+    e.agreement.forEach(a => ag.append(el("span", null, a.model), el("span", null, `${Math.round(a.match * 100)}%`)));
+    parts.push(el("div", "stats", "Share of fields where each model matched the most common answer:"), ag);
+    if (e.skipped.length) parts.push(el("div", "stats", `Skipped as readers (can't see images): ${e.skipped.join(", ")}`));
+    parts.push(el("div", "verdict", `first result at ${e.first_result}s · all done at ${e.secs}s · ${e.load_secs}s loading models`));
   } else if (e.mode === "vision") {
     const asked = e.answer !== e.combined;
     const res = el("div", "txt" + (e.format !== "text" && !asked ? " code" : ""), e.answer);
@@ -847,12 +965,16 @@ async function run(task) {
   const sab = m === "relay" && chain.includes(saboteur) ? chain.indexOf(saboteur) : null;
   openId = null;
   const readers = chain.filter(n => (installed.find(x => x.name === n) || {}).vision);
-  if (m === "vision") renderStage(task, rule, [...readers, $("#combiner").value], m, null, [], images.map(i => i.url));
+  if (m === "vision") {
+    const cards = visionCards(readers, $("#format").value, $("#combiner").value, !!task);
+    renderStage(task, rule, cards.names, m, null, [], images.map(i => i.url), cards.roles);
+  }
   else renderStage(task, rule, chain, m, sab, routeNow());
   const params = { task, chain: chain.join(","), mode: m, rule, cipher: $("#cipher").value, saboteur: sab ?? "",
                    langs: route.slice(0, chain.length - 1).join(","),
                    ...(m === "vision" ? { images: images.map(i => i.b64), format: $("#format").value,
-                                          combiner: $("#combiner").value, strategy } : {}) };
+                                          combiner: $("#combiner").value, strategy,
+                                          fields: fieldSpec.filter(f => f.name.trim()) } : {}) };
   try {
     const res = await fetch("/run", { method: "POST", headers: { "Content-Type": "application/json" },
                                       body: JSON.stringify(params) });
@@ -881,6 +1003,8 @@ $("#form").onsubmit = ev => {
   if (running) return;
   if (current === "vision") {
     if (!images.length) return warn("Add a photo first: drop one in, paste it, or choose a file.");
+    if ($("#format").value === "fields" && !fieldSpec.some(f => f.name.trim()))
+      return warn("Name at least one field for the models to fill in.");
     if (!chain.some(n => (installed.find(x => x.name === n) || {}).vision))
       return warn("None of the models in the chain can see images. Add gemma3:4b or a gemma4 model.");
     return run(task);
@@ -928,7 +1052,8 @@ async function openRun(id) {
   grow($("#task"), 260); grow($("#rule"), 120);
   if (r.cipher) $("#cipher").value = r.cipher;
   if (r.langs) route = r.langs.slice(0, -1);
-  if (r.format) $("#format").value = r.format;
+  if (r.format) { $("#format").value = r.format; $("#fieldsBox").hidden = r.format !== "fields"; }
+  if (r.fields) { fieldSpec = r.fields.map(f => ({ ...f })); saveFields(); renderFields(); }
   if (r.combiner) renderCombiner(r.combiner);
   const imgUrls = (r.images || (r.image ? [r.image] : [])).map(n => "/images/" + n);
   if (r.strategy) strategy = r.strategy;
@@ -940,7 +1065,10 @@ async function openRun(id) {
   if (missing.length) warn("Not installed any more: " + missing.join(", "));
   setMode(r.mode);  // switch tabs first, so the run's chain lands in its own tab
   if (!missing.length) { chain = [...r.chain]; renderChain(); }
-  if (r.mode === "vision") renderStage(r.task, r.rule, [...r.readers, r.combiner], r.mode, null, [], imgUrls);
+  if (r.mode === "vision") {
+    const cards = visionCards(r.readers, r.format, r.combiner, r.answer !== r.combined);
+    renderStage(r.task, r.rule, cards.names, r.mode, null, [], imgUrls, cards.roles);
+  }
   else renderStage(r.task, r.rule, r.chain, r.mode, r.saboteur ?? null, r.langs);
   if (r.mode === "cipher") handle({ type: "start", cipher: r.ciphers[0], sent: r.encoded });
   const honest = r.sabotage?.outcome === "no_lie";  // older runs didn't record "lied" per step

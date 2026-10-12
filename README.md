@@ -34,6 +34,14 @@ The point is the plumbing and the limits, not solving problems.
   one photo before starting the next). Each run records when the first result appeared, when it
   finished, and how long went to loading models.
 
+  **Custom fields** (pick it as the format): fill in the fields you want the models to pull from the
+  photo, such as store, date and total, each with a type (text, number, date, money or list), or
+  start from a preset (receipt, business card, event flyer, book cover, nutrition label). Each model
+  fills them in on its own and leaves a field empty when it isn't in the photo. Code, not a model,
+  then picks each field's most common answer, so nothing is made up at that step. The result is a
+  grid of every model's answer per field, with the ones that differ from the majority highlighted,
+  so you can see how each model performed.
+
 The chain can be in any order (drag the models on the page, or `--chain`), including smallest on top.
 
 ## Run
@@ -120,3 +128,7 @@ python3 harness.py --show runs/harness/<file>.json   # reprint a scorecard
 
   Photo by photo shows something first but finishes last, because the models don't fit in memory
   together and reload for every photo.
+- Custom fields on the cafe receipt, read by gemma3:4b, gemma4:e2b and gemma4:e4b: store, subtotal,
+  tax and total were unanimous, and all three left "phone number" empty rather than inventing one.
+  The two split fields were style, not misreading: gemma3:4b put the time in the date, and
+  gemma4:e4b put prices in the item names.

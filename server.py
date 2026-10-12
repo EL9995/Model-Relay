@@ -99,7 +99,8 @@ class Handler(BaseHTTPRequestHandler):
                           q.get("rule", ""), send, saboteur=int(sab) if sab.isdigit() else None,
                           cipher_name=cipher, route=split(q.get("langs")),
                           images=q.get("images") or [q.get("image")], fmt=q.get("format", "text"),
-                          combiner=q.get("combiner") or "granite4.2:8b", strategy=q.get("strategy", "batch"))
+                          combiner=q.get("combiner") or "granite4.2:8b", strategy=q.get("strategy", "batch"),
+                          fields=q.get("fields") or [])
             send({"type": "done", **{k: v for k, v in r.items() if k != "trace"}})
         except (BrokenPipeError, ConnectionResetError):
             pass  # the page was closed mid-run
