@@ -1,0 +1,33 @@
+{
+  "name": "basics",
+  "description": "Short questions with one right answer: math, letter counting, facts, trick questions, following a rule, and passing a cipher message.",
+  "cases": [
+    {"id": "mul", "tags": ["math"], "prompt": "What is 17 times 23?", "check": {"number": 391}},
+    {"id": "div", "tags": ["math"], "prompt": "What is 144 divided by 12?", "check": {"number": 12}},
+    {"id": "percent", "tags": ["math"], "prompt": "What is 15% of 80?", "check": {"number": 12}},
+    {"id": "dozen", "tags": ["math"], "prompt": "I have 3 apples and buy 2 dozen more. How many apples do I have now?", "check": {"number": 27}},
+    {"id": "bat-ball", "tags": ["math", "trick"], "prompt": "A bat and a ball cost $1.10 in total. The bat costs $1.00 more than the ball. How many cents does the ball cost?", "check": {"number": 5}},
+    {"id": "power", "tags": ["math"], "prompt": "What is 2 to the power of 10?", "check": {"number": 1024}},
+
+    {"id": "strawberry", "tags": ["counting"], "prompt": "How many times does the letter r appear in the word strawberry?", "check": {"number": 3}},
+    {"id": "banana", "tags": ["counting"], "prompt": "How many letters are in the word banana?", "check": {"number": 6}},
+    {"id": "excellence", "tags": ["counting"], "prompt": "How many times does the letter e appear in the word excellence?", "check": {"number": 4}},
+
+    {"id": "australia", "tags": ["facts"], "prompt": "What is the capital of Australia?", "check": {"contains": "Canberra"}},
+    {"id": "canada", "tags": ["facts"], "prompt": "What is the capital of Canada?", "check": {"contains": "Ottawa"}},
+    {"id": "planet", "tags": ["facts"], "prompt": "Which planet is closest to the Sun?", "check": {"contains": "Mercury"}},
+    {"id": "shakespeare", "tags": ["facts"], "prompt": "Who wrote Romeo and Juliet?", "check": {"contains": "Shakespeare"}},
+    {"id": "gold", "tags": ["facts"], "prompt": "What is the chemical symbol for gold?", "check": {"regex": "\\bAu\\b"}},
+
+    {"id": "months-28", "tags": ["trick"], "prompt": "How many months of the year have 28 days?", "check": {"number": 12}},
+    {"id": "feathers", "tags": ["trick"], "prompt": "Which is heavier, a kilogram of feathers or a kilogram of steel?", "check": {"contains": ["same", "equal", "neither", "both weigh"]}},
+    {"id": "race", "tags": ["trick"], "prompt": "In a race, you pass the person in second place. What place are you in now?", "check": {"contains": ["second", "2nd"]}},
+
+    {"id": "one-word", "tags": ["rule"], "prompt": "Name a fruit.", "rule": "Answer in exactly one word.", "check": {"max_words": 1}},
+    {"id": "lowercase", "tags": ["rule"], "prompt": "List three colors.", "rule": "Write your whole reply in lowercase letters.", "check": {"regex": "^[^A-Z]*$"}},
+    {"id": "no-e", "tags": ["rule"], "prompt": "What is the capital of France?", "rule": "Never use the letter e in your reply.", "check": {"contains": "Paris", "not_contains": "e"}},
+
+    {"id": "cipher-b64", "tags": ["cipher"], "mode": "cipher", "cipher": "base64", "prompt": "meet at noon", "check": {"intact": true}},
+    {"id": "cipher-rot13", "tags": ["cipher"], "mode": "cipher", "cipher": "rot13", "prompt": "the eagle has landed", "check": {"intact": true}}
+  ]
+}
