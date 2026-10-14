@@ -114,6 +114,8 @@ def ask(model, prompt, kind, rule="", max_tokens=MAX_TOKENS, images=None, num_ct
             raise
         body.pop("think")  # models without a thinking mode reject the flag
         r = post("/api/generate", body)
+    if not r.get("response", "").strip() and not r.get("eval_count"):
+        r = post("/api/generate", body)  # an empty reply is a hiccup (e.g. memory pressure); try once more
     secs = time.time() - start
     try:
         out = json.loads(r["response"]) if kind != "bottom" else {"answer": r["response"].strip()}
