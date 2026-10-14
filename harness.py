@@ -26,6 +26,7 @@ OUT = relay.RUNS / "harness"
 NUMBER_WORDS = {w: i for i, w in enumerate(
     "zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen "
     "fifteen sixteen seventeen eighteen nineteen twenty".split())}
+NUMBER_WORDS.update(once=1, twice=2, thrice=3)
 
 
 # ---- checks: each returns (passed, why) ----
@@ -43,14 +44,17 @@ def numbers(text):
 
 
 def check_number(answer, want, prompt):
-    """Right if the answer ends on the expected number ("144 / 12 = 12"), or the first
-    number it adds beyond the prompt's is the expected one ("5 cents ($0.05)")."""
+    """Right if the answer ends on the expected number ("144 / 12 = 12"), the first number
+    it adds beyond the prompt's is the expected one ("5 cents ($0.05)"), or the number
+    right after the first "is", "=" or "equals" is ("is 12, with a remainder of 0")."""
     nums = numbers(answer)
     if not nums:
         return False, "no number in the answer"
     given = set(numbers(prompt))
     new = [n for n in nums if n not in given]
-    ok = nums[-1] == want or (bool(new) and new[0] == want)
+    stated = re.search(r"(?:\bis\b|=|\bequals\b)\W{0,3}([\d,]+(?:\.\d+)?|[a-z]+)", answer.lower())
+    said = numbers(stated.group(1)) if stated else []
+    ok = nums[-1] == want or (bool(new) and new[0] == want) or (bool(said) and said[0] == want)
     return ok, f"got {', '.join(f'{n:g}' for n in (new or nums)[:4])}"
 
 

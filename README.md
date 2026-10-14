@@ -152,3 +152,13 @@ python3 harness.py --show runs/harness/<file>.json   # reprint a scorecard
   reading the others, and the vote picked "three". The next run went wrong: gemma3:4b started at three,
   switched to four during the discussion, won the vote 2–1 and the moderator agreed. Discussion can
   correct a model or talk it out of the right answer.
+- Eight more text models on the harness, each alone (2026-10-13): qwen3:8b and mistral-nemo:12b
+  19/22, llama3.2:3b and deepseek-r1:7b 18/22 (deepseek-r1 at 18.6 s per question, thinking every
+  time), phi4-mini:3.8b and hermes3:8b 17/22, llama3.2:1b and mistral:7b 15/22. Only deepseek-r1 and
+  qwen3:8b counted the e's in "excellence"; none passed a cipher case alone. qwen3:8b counted
+  strawberry right when it could spell the word out, and wrong when asked for just the number.
+- Nine image models on the test receipt, graded against its real contents (7 fields, including a
+  phone number the receipt doesn't have): gemma3:4b, gemma4:e2b, e4b, 12b and minicpm-v4.5:8b got
+  7/7; glm-ocr 6/7 (it made up a phone number); granite3.2-vision:2b 4/7 (wrong subtotal and
+  total); llava:7b 0/7 ("Male Street Cafe", invented items and prices). deepseek-ocr:3b transcribed
+  it perfectly but only follows its "Free OCR." command, so it can't fill in fields.
