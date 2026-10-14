@@ -8,6 +8,7 @@ Run:   python3 server.py        then open http://localhost:8765
 import json
 import os
 import re
+import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -79,8 +80,10 @@ class Handler(BaseHTTPRequestHandler):
             self.reply(404, "text/plain", b"not found")
 
     def do_POST(self):
-        """Same as GET /run, but the settings come as JSON, so an image fits."""
+        """Same as GET /run, but the settings come as JSON, so an image fits. Also /save."""
         size = int(self.headers.get("Content-Length") or 0)
+        if urlparse(self.path).path == "/save" and 0 < size < 4096:
+            return self.save_run(json.loads(self.rfile.read(size) or b"{}"))
         if urlparse(self.path).path != "/run" or not 0 < size <= MAX_BODY:
             return self.reply(413 if size > MAX_BODY else 404, "text/plain", b"bad request")
         try:
@@ -120,6 +123,32 @@ class Handler(BaseHTTPRequestHandler):
             pass  # the page was closed mid-run
         except Exception as e:
             send({"type": "error", "message": str(e)})
+
+    def save_run(self, q):
+        """Ask where to save a run with the Mac's own Save dialog, then write its report there.
+        For browsers that can't show a save dialog themselves (Safari)."""
+        rid = str(q.get("id", ""))
+        r = relay.load_run(rid)
+        if not r:
+            return self.reply(404, "application/json", b'{"error": "no such run"}')
+        script = ['-e', 'activate',  # brings the dialog to the front
+                  '-e', f'POSIX path of (choose file name with prompt "Save this run (end the name with .html '
+                        f'for a web page, otherwise it saves as Markdown)" default name "{rid}.md" '
+                        f'default location (path to desktop folder))']
+        try:
+            done = subprocess.run(["osascript", *script], capture_output=True, text=True, timeout=600)
+        except (OSError, subprocess.TimeoutExpired) as e:
+            return self.reply(500, "application/json", json.dumps({"error": str(e)}).encode())
+        if done.returncode != 0:  # -128 is the Cancel button
+            cancelled = "-128" in done.stderr
+            return self.reply(200, "application/json",
+                              json.dumps({"cancelled": True} if cancelled else {"error": done.stderr.strip()}).encode())
+        path = Path(done.stdout.strip())
+        if path.suffix.lower() not in (".md", ".html", ".htm"):
+            path = path.with_name(path.name + ".md")
+        text = report.to_html(r) if path.suffix.lower() in (".html", ".htm") else report.to_markdown(r)
+        path.write_text(text)
+        self.reply(200, "application/json", json.dumps({"path": str(path)}).encode())
 
     def reply(self, code, ctype, body, headers=None):
         self.send_response(code)

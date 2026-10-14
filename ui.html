@@ -31,6 +31,8 @@
   button.ghost { background: none; color: var(--muted); border: 1px solid var(--line);
                  padding: 3px 10px; font-size: 12px; font-weight: 500; }
   button.ghost:hover { color: var(--ink); }
+  #saveRun { padding: 7px 14px; font-size: 13px; }
+  #saveRun:disabled { opacity: .4; }
   a.btnlink { display: inline-block; color: var(--muted); border: 1px solid var(--line); border-radius: 8px;
               padding: 3px 10px; font-size: 12px; font-weight: 500; text-decoration: none; }
   a.btnlink:hover { color: var(--ink); }
@@ -346,7 +348,8 @@
     <div class="prompt">
       <textarea id="task" rows="2" aria-label="Prompt"></textarea>
       <div class="pfoot">
-        <span>Enter to run · Shift+Enter for a new line</span>
+        <span id="saveNote">Enter to run · Shift+Enter for a new line</span>
+        <button type="button" class="ghost" id="saveRun" disabled title="Save the run shown below to a file you choose">Save run</button>
         <button id="go">Run</button>
       </div>
     </div>
@@ -445,6 +448,7 @@ const el = (tag, cls, text) => {
   return e;
 };
 let installed = [], unusable = [], chain = [], ramGb = 0, running = false, openId = null;
+let shownId = null;  // the saved run on screen, which "Save run" saves
 let current = "relay", saboteur = null;
 let languages = [], defaultRoute = [], route = [];  // route: one language per position, not per model  // saboteur is a model name, so it follows the model when you reorder
 const gb = name => (installed.find(m => m.name === name) || {}).gb || 0;
@@ -1140,6 +1144,7 @@ function finish(e) {
     parts.push(el("div", "stats", `${e.secs}s · ${e.calls} model calls · at most ${e.peak.length} of ${e.chain.length} models in memory at once`));
   }
   parts.push(el("div", "stats", e.id ? `Saved ${e.time.replace("T", " ")} · runs/${e.id}.json` : "Not saved"));
+  setShown(e.id || null);
   if (e.id) {  // readable copies of the run
     const row = el("div", "fbtns"); row.style.marginTop = "8px";
     const page = el("a", "ghost btnlink", "Open report"); page.href = `/runs/${encodeURIComponent(e.id)}.html`; page.target = "_blank";
@@ -1155,7 +1160,7 @@ function finish(e) {
 }
 
 async function run(task) {
-  running = true; $("#go").disabled = true; warn("");
+  running = true; $("#go").disabled = true; warn(""); setShown(null);
   const rule = $("#rule").value.trim(), m = current;
   const sab = m === "relay" && chain.includes(saboteur) ? chain.indexOf(saboteur) : null;
   openId = null;
@@ -1209,6 +1214,36 @@ $("#form").onsubmit = ev => {
   if (current === "roundtable" && chain.length < 2) return warn("A roundtable needs at least two models.");
   if (task) run(task);
 };
+
+// ---- "Save run": write the run on screen to a file the user picks ----
+const KEYS = "Enter to run · Shift+Enter for a new line";
+function setShown(id) {
+  shownId = id; $("#saveRun").disabled = !id;
+  $("#saveNote").textContent = KEYS;
+}
+async function saveRun() {
+  if (!shownId) return;
+  const note = t => $("#saveNote").textContent = t;
+  if (window.showSaveFilePicker) {  // Chrome, Edge, Arc: the browser's own Save dialog
+    let handle;
+    try {
+      handle = await showSaveFilePicker({ suggestedName: `${shownId}.md`, types: [
+        { description: "Markdown (readable text)", accept: { "text/markdown": [".md"] } },
+        { description: "Web page (open in a browser, print to PDF)", accept: { "text/html": [".html"] } }] });
+    } catch (err) { if (err.name !== "AbortError") note("Couldn't open the Save dialog: " + err.message); return; }
+    const ext = /\.html?$/i.test(handle.name) ? "html" : "md";
+    const text = await (await fetch(`/runs/${encodeURIComponent(shownId)}.${ext}`)).text();
+    const w = await handle.createWritable(); await w.write(text); await w.close();
+    return note(`Saved as ${handle.name}`);
+  }
+  note("Choose where to save it in the Save window…");  // Safari: the Mac's Save dialog, opened by the server
+  try {
+    const r = await (await fetch("/save", { method: "POST", headers: { "Content-Type": "application/json" },
+                                           body: JSON.stringify({ id: shownId }) })).json();
+    note(r.path ? `Saved to ${r.path.replace(/^\/Users\/[^/]+/, "~")}` : r.cancelled ? KEYS : "Couldn't save: " + r.error);
+  } catch (err) { note("Couldn't save: " + err.message); }
+}
+$("#saveRun").onclick = saveRun;
 
 // ---- saved runs ----
 function summary(r) {

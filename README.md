@@ -80,6 +80,10 @@ Print → Save as PDF for a PDF) and **Download Markdown** (the same report as p
 or notes). Each mode gets its own layout. From the command line:
 `python3 report.py runs/<file>.json` writes both into `runs/reports/`.
 
+**Save run**, next to Run, saves just the run on screen (one you ran or reopened) wherever you
+choose: end the name in `.md` for Markdown or `.html` for a web page. Chrome, Edge and Arc show
+their own Save dialog; in Safari the server opens the Mac's Save dialog instead.
+
 ## Harness
 
 `harness.py` scores configurations on a suite of questions with known answers
