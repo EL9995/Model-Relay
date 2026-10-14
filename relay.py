@@ -21,6 +21,7 @@ import base64
 import difflib
 import hashlib
 import json
+import random
 import re
 import sys
 import time
@@ -664,6 +665,136 @@ def vision(instruction, chain, rule="", on_event=lambda e: None, images=(), fmt=
         **({"fields": fields, "grids": [grids[p] for p in photos]} if fmt == "fields" else {})}
 
 
+# ---- roundtable mode ----
+
+ROUNDTABLE_TOKENS = 250  # keep turns short; the transcript grows every turn
+ENDINGS = ["vote", "moderator", "both"]
+SAY_FIRST = (
+    "You are {me}, one of {k} AI models at a roundtable. Here is the question:\n{task}\n\n"
+    "Answer it on your own in a few sentences. End with one line that starts with \"My answer:\"."
+)
+SAY_AGAIN = (
+    "You are {me}, one of {k} AI models at a roundtable discussing this question:\n{task}\n\n"
+    "The discussion so far:\n{transcript}\n\n"
+    "This is discussion round {r} of {rounds}. Read what the others said. Point out anything you think "
+    "is wrong, and say whether you've changed your mind and why. Keep it under 120 words. End with two "
+    "lines: \"Changed my mind: yes\" or \"Changed my mind: no\", then one that starts with \"My answer:\"."
+)
+BALLOT_PROMPT = (
+    "Question:\n{task}\n\nA roundtable of AI models discussed it. Here are their final answers, "
+    "labeled by letter:\n\n{options}\n\nWhich answer is best? Judge correctness first, then clarity. "
+    "Give the letter and a one-line reason."
+)
+MODERATE_PROMPT = (
+    "You moderated a roundtable of AI models discussing this question:\n{task}\n\n"
+    "The discussion:\n{transcript}\n{votes}\n"
+    "Sum up in a few sentences where they agreed and disagreed, then give the best final answer on its "
+    "own line, starting with \"Final answer:\"."
+)
+
+
+def tagged(text, tag):
+    """What follows the last "<tag>:" in the text, to the end of that line; models often put
+    it mid-paragraph rather than on its own line."""
+    found = re.findall(rf"(?i){tag}\W*:\**\s*([^\n]+)", text)
+    return found[-1].strip().strip("*").strip() if found else None
+
+
+def my_answer(text):
+    """The model's "My answer:", or its last line if it left the tag out."""
+    found = tagged(text, "my answer")
+    if found is not None:
+        return found
+    lines = [l.strip() for l in text.strip().splitlines() if l.strip()]
+    return lines[-1] if lines else ""
+
+
+def roundtable(task, chain, rule="", on_event=lambda e: None, rounds=2, ending="vote",
+               moderator="granite4.2:8b", allow_self=False):
+    """Every model answers alone (round 0), then they discuss over a shared transcript for
+    `rounds` rounds; each turn sees everything said so far. It ends with an anonymous
+    vote counted by code, a moderator's summary, or both."""
+    if len(chain) < 2:
+        raise ValueError("a roundtable needs at least two models")
+    if ending not in ENDINGS:
+        raise ValueError(f"unknown ending {ending!r}")
+    snapshots.clear()
+    k, rounds = len(chain), max(0, min(int(rounds), 4))
+    t0, trace, said = time.time(), [], []  # said: [{model, round, text}]
+    answers = {}  # model -> its answer after each round, latest last
+
+    def step(entry):
+        entry["at"] = round(time.time() - t0, 1)
+        trace.append(entry)
+        on_event({"type": "step", **entry})
+
+    def transcript():
+        return "\n\n".join(f"[Round {x['round']}] {x['model']}: {x['text']}" for x in said)
+
+    for r in range(rounds + 1):
+        for i, model in enumerate(chain):
+            on_event({"type": "call", "dir": "say", "layer": i, "model": model, "round": r})
+            prompt = (SAY_FIRST.format(me=model, k=k, task=task) if r == 0 else
+                      SAY_AGAIN.format(me=model, k=k, task=task, transcript=transcript(), r=r, rounds=rounds))
+            out, secs, tps = ask(model, prompt, "bottom", rule, ROUNDTABLE_TOKENS, num_ctx=COMBINE_CTX)
+            text, ans = out["answer"], my_answer(out["answer"])
+            prev = answers.get(model, [])
+            said_so = tagged(text, "changed my mind")  # the model's own word, when it gives it
+            if said_so is not None and r > 0:
+                changed = said_so.lower().startswith("yes")
+            else:  # otherwise guess from how much the answer's wording moved
+                changed = bool(prev) and word_match(prev[-1], ans) < 0.5
+            answers.setdefault(model, []).append(ans)
+            said.append({"model": model, "round": r, "text": text})
+            step({"dir": "say", "layer": i, "model": model, "round": r, "sent": text, "answer": ans,
+                  "changed": changed, "secs": secs, "tok_s": tps, "cut": out["cut"], "load": out["load"]})
+
+    final = {m: a[-1] for m, a in answers.items()}
+    extra = {"rounds": rounds, "ending": ending, "allow_self": allow_self, "answers": final,
+             "minds_changed": sum(t["changed"] for t in trace if t["dir"] == "say")}
+    answer = None
+
+    if ending in ("vote", "both"):
+        tally, ballots = {m: 0 for m in chain}, []
+        for i, voter in enumerate(chain):
+            options = [m for m in chain if allow_self or m != voter]
+            random.Random(f"{task}|{voter}").shuffle(options)  # a different order for every voter
+            labels = {chr(65 + j): m for j, m in enumerate(options)}
+            text = "\n\n".join(f"{lab}: {final[m]}" for lab, m in labels.items())
+            schema = {"type": "object", "properties": {"vote": {"type": "string", "enum": list(labels)},
+                                                       "reason": {"type": "string"}}, "required": ["vote", "reason"]}
+            on_event({"type": "call", "dir": "ballot", "layer": i, "model": voter})
+            out, secs, tps = ask(voter, BALLOT_PROMPT.format(task=task, options=text), "ballot", rule, 120,
+                                 num_ctx=COMBINE_CTX, schema=schema)
+            pick = labels.get(str(out.get("vote", "")).strip().upper())
+            if pick:
+                tally[pick] += 1
+            ballots.append({"voter": voter, "for": pick, "label": out.get("vote"), "order": labels,
+                            "reason": str(out.get("reason", "")).strip(), "spoiled": not pick})
+            step({"dir": "ballot", "layer": i, "model": voter, "for": pick, "reason": ballots[-1]["reason"],
+                  "spoiled": not pick, "sent": ballots[-1]["reason"], "secs": secs, "tok_s": tps})
+        top = max(tally.values())
+        winners = [m for m, c in tally.items() if c == top and top > 0]
+        extra.update(tally=tally, ballots=ballots, winners=winners)
+        answer = final[winners[0]] if len(winners) == 1 else None
+
+    if ending in ("moderator", "both"):
+        votes = ""
+        if ending == "both":
+            votes = "\nThe models then voted: " + ", ".join(f"{m} {c}" for m, c in extra["tally"].items()) + ".\n"
+        on_event({"type": "call", "dir": "moderate", "layer": k, "model": moderator})
+        out, secs, tps = ask(moderator, MODERATE_PROMPT.format(task=task, transcript=transcript(), votes=votes),
+                             "bottom", rule, VISION_TOKENS, num_ctx=COMBINE_CTX)
+        extra.update(moderator=moderator, summary=out["answer"])
+        answer = tagged(out["answer"], "final answer") or answer or my_answer(out["answer"])
+        step({"dir": "moderate", "layer": k, "model": moderator, "sent": out["answer"], "secs": secs,
+              "tok_s": tps, "cut": out["cut"], "load": out["load"]})
+
+    if answer is None:  # a tied vote and no moderator
+        answer = " / ".join(final[m] for m in extra.get("winners", [])) or "no winner"
+    return answer, trace, extra
+
+
 def blind(task, chain, rule="", on_event=lambda e: None):
     """Every model gets the original task word for word and answers on its own.
     No model sees another's answer. One model at a time, so it fits in memory."""
@@ -681,7 +812,7 @@ def blind(task, chain, rule="", on_event=lambda e: None):
 
 def run(task, chain, mode="relay", rule="", on_event=lambda e: None, save=True,
         saboteur=None, cipher_name="base64", route=(), images=(), fmt="text", combiner="granite4.2:8b",
-        strategy="batch", fields=()):
+        strategy="batch", fields=(), rounds=2, ending="vote", moderator="granite4.2:8b", allow_self=False):
     """Run one relay, blind, cipher or translate pass and return its record, saved to runs/
     unless save=False."""
     start = time.time()
@@ -694,6 +825,8 @@ def run(task, chain, mode="relay", rule="", on_event=lambda e: None, save=True,
         answer, trace, extra = translate(task, chain, rule, on_event, route)
     elif mode == "vision":
         answer, trace, extra = vision(task, chain, rule, on_event, images, fmt, combiner, strategy, fields)
+    elif mode == "roundtable":
+        answer, trace, extra = roundtable(task, chain, rule, on_event, rounds, ending, moderator, allow_self)
     else:
         if saboteur is not None and not 0 <= saboteur < len(chain):
             raise ValueError(f"saboteur layer {saboteur + 1} isn't in a {len(chain)}-model chain")
@@ -738,7 +871,8 @@ def list_runs():
         runs.append({k: r.get(k) for k in ("id", "time", "mode", "task", "rule", "chain", "answer",
                                            "secs", "calls", "cipher", "intact", "sabotage",
                                            "langs", "match", "format", "combiner", "image", "images",
-                                           "readers", "strategy")})
+                                           "readers", "strategy", "rounds", "ending", "winners",
+                                           "tally", "minds_changed")})
     return runs
 
 

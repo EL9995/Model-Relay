@@ -42,6 +42,12 @@ The point is the plumbing and the limits, not solving problems.
   grid of every model's answer per field, with the ones that differ from the majority highlighted,
   so you can see how each model performed.
 
+- **Roundtable**: every model answers on its own (round 0), then they discuss in one shared
+  conversation for a few rounds; each turn sees everything said so far. Each model says whether it
+  changed its mind. It ends with a vote (answers anonymous and shuffled per voter, no voting for
+  yourself unless you allow it, a strict reply format, counted by code), a moderator's summary, or
+  both.
+
 The chain can be in any order (drag the models on the page, or `--chain`), including smallest on top.
 
 ## Run
@@ -132,3 +138,8 @@ python3 harness.py --show runs/harness/<file>.json   # reprint a scorecard
   tax and total were unanimous, and all three left "phone number" empty rather than inventing one.
   The two split fields were style, not misreading: gemma3:4b put the time in the date, and
   gemma4:e4b put prices in the item names.
+- Roundtable, "How many times does the letter r appear in strawberry?" with gemma3:1b, granite4.2:3b
+  and gemma3:4b, one discussion round. One run went right: granite4.2:3b moved from 2 to three after
+  reading the others, and the vote picked "three". The next run went wrong: gemma3:4b started at three,
+  switched to four during the discussion, won the vote 2–1 and the moderator agreed. Discussion can
+  correct a model or talk it out of the right answer.

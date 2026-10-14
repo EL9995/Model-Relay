@@ -10,6 +10,7 @@
     --accent: #2f6fdb; --accent-soft: #e6eefc; --up: #1f8a5b; --up-soft: #e3f4ec;
     --warn: #b7600b; --warn-soft: #fbeedd; --bad: #c0392b; --bad-soft: #fbe5e2;
     --violet: #7048c8; --violet-soft: #efe9fb; --teal: #0f7c80; --teal-soft: #e0f2f2;
+    --pink: #b3337a; --pink-soft: #fbe6f1;
     --mono: ui-monospace, "SF Mono", Menlo, monospace;
   }
   @media (prefers-color-scheme: dark) {
@@ -18,6 +19,7 @@
       --accent: #6c9cf0; --accent-soft: #1d2a40; --up: #4cc08a; --up-soft: #16302a;
       --warn: #e59a4a; --warn-soft: #3a2a17; --bad: #ef6b5b; --bad-soft: #3d1d1a;
       --violet: #ad8cf2; --violet-soft: #2a2140; --teal: #4cc4c8; --teal-soft: #13302f;
+      --pink: #ef7fb9; --pink-soft: #3a1a2b;
     }
   }
   * { box-sizing: border-box; }
@@ -193,6 +195,31 @@
   .tag.sab { background: var(--bad-soft); color: var(--bad); }
   .tag.translate { background: var(--violet-soft); color: var(--violet); }
   .tag.vision { background: var(--teal-soft); color: var(--teal); }
+  .tag.roundtable { background: var(--pink-soft); color: var(--pink); }
+
+  /* ---- roundtable: a group chat ---- */
+  .room { display: grid; gap: 10px; margin-top: 14px; }
+  .divider { display: flex; align-items: center; gap: 10px; font-size: 12px; font-weight: 600; color: var(--muted);
+             text-transform: uppercase; letter-spacing: .05em; margin-top: 6px; }
+  .divider::before, .divider::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+  .bubble { background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--who);
+            border-radius: 10px; padding: 10px 14px; animation: pop .25s ease-out; }
+  .bubble .who { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
+  .bubble .who b { font-family: var(--mono); color: var(--who); }
+  .bubble .who small { font-family: var(--mono); font-size: 11px; color: var(--muted); margin-left: auto; }
+  .bubble .txt { white-space: pre-wrap; word-break: break-word; margin-top: 4px; }
+  .bubble .ans { margin-top: 8px; padding-top: 6px; border-top: 1px dashed var(--line); font-weight: 600; }
+  .bubble .tag { margin-left: 4px; }
+  .ballot { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; font-size: 14px; padding: 6px 2px; }
+  .ballot b { font-family: var(--mono); }
+  .ballot span { color: var(--muted); grid-column: 2; }
+  .typing { font-size: 13px; color: var(--muted); padding: 4px 2px; }
+  .typing::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+                    background: var(--accent); margin-right: 8px; animation: blink 1s infinite; }
+  .tally { display: grid; grid-template-columns: auto 1fr auto; gap: 6px 10px; align-items: center; margin-top: 8px; font-size: 13px; }
+  .tally span:first-child { font-family: var(--mono); }
+  .tally .bar { height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; }
+  .tally .bar i { display: block; height: 100%; background: var(--up); }
   .empty { color: var(--muted); font-size: 13px; padding: 4px 8px 8px; }
 
   /* ---- stage ---- */
@@ -265,6 +292,7 @@
       <button type="button" role="tab" data-mode="cipher">Cipher</button>
       <button type="button" role="tab" data-mode="translate">Translate</button>
       <button type="button" role="tab" data-mode="vision">Vision</button>
+      <button type="button" role="tab" data-mode="roundtable">Roundtable</button>
     </div>
   </div>
 </header>
@@ -368,6 +396,33 @@
         </div>
         <p class="shint" id="stratHint"></p>
       </div>
+    </section>
+    <section class="panel" id="roundPanel" hidden>
+      <div class="phead"><h2>Roundtable</h2></div>
+      <p class="phint">Round 0: everyone answers alone. Then each discussion round, every model reads the whole conversation so far and replies.</p>
+      <label class="field"><span>Discussion rounds</span>
+        <select id="rounds" style="width:100%">
+          <option value="0">0 (just answer, then vote)</option>
+          <option value="1">1</option>
+          <option value="2" selected>2</option>
+          <option value="3">3</option>
+        </select>
+      </label>
+      <div class="field"><span>How it ends</span>
+        <div class="strat ending" role="group" aria-label="How the roundtable ends">
+          <button type="button" data-ending="vote">Vote</button>
+          <button type="button" data-ending="moderator">Moderator</button>
+          <button type="button" data-ending="both">Both</button>
+        </div>
+        <p class="shint" id="endHint"></p>
+      </div>
+      <label class="field" id="modField"><span>Moderator</span>
+        <select id="moderator" style="width:100%"></select>
+      </label>
+      <label class="phint" style="display:flex;gap:8px;align-items:center;margin:0">
+        <input type="checkbox" id="allowSelf"> Let models vote for their own answer (to measure self-bias)
+      </label>
+      <p class="shint" id="roundHint"></p>
     </section>
     <details class="panel history">
       <summary>Saved runs <span id="hcount"></span></summary>
@@ -492,6 +547,9 @@ const MODES = {
   translate: { hint: "Each model translates the text into its language, then hands it on. The last one translates back to English so you can compare.",
                placeholder: "Something to translate… e.g. Break a leg tonight, it'll be a piece of cake.",
                chain: "Top to bottom. Each model translates into the language beside it. Drag to reorder; the languages stay in place." },
+  roundtable: { hint: "Every model answers on its own, then they discuss in one shared conversation. At the end they vote on the best answer, a moderator sums up, or both.",
+                placeholder: "A question to discuss… e.g. How many times does the letter r appear in strawberry?",
+                chain: "Speaking order, top to bottom. Every message switches models, so small ones that fit in memory together keep it fast." },
   vision: { hint: "Several models read the same photo on their own, then a final agent combines what they found and passes it on.",
             placeholder: "Optional: what the final agent should do with the text, e.g. List what I bought and the total.",
             chain: "Models marked “reads” see the photo. The rest are skipped as readers, but any of them can be the final agent." },
@@ -547,6 +605,28 @@ document.querySelectorAll(".strat.fmt button").forEach(b => b.onclick = () => se
 renderFields();
 setFormat("text");
 
+// ---- roundtable settings ----
+const ENDS = { vote: "Each model votes for the best final answer. Answers are anonymous and shuffled, and code counts the votes.",
+               moderator: "A moderator reads the whole discussion, sums it up and gives a final answer.",
+               both: "The models vote, then a moderator sums up, knowing how the vote went." };
+let ending = "vote";
+function renderRoundPanel() {
+  document.querySelectorAll(".strat.ending button").forEach(b => b.setAttribute("aria-pressed", b.dataset.ending === ending));
+  $("#endHint").textContent = ENDS[ending];
+  $("#modField").hidden = ending === "vote";
+  const sel = $("#moderator"), keep = sel.value || (installed.some(m => m.name === "granite4.2:8b") ? "granite4.2:8b" : installed[0]?.name);
+  sel.replaceChildren(...installed.map(m => { const o = el("option", null, `${m.name} · ${m.gb} GB`); o.value = m.name; return o; }));
+  if (keep) sel.value = keep;
+  const need = [...new Set([...chain, ...(ending === "vote" ? [] : [sel.value])])].reduce((t, n) => t + gb(n), 0);
+  const tight = chain.length > 3 || (ramGb && need > ramGb * 0.6);
+  $("#roundHint").textContent = chain.length < 2 ? "Add at least two models." :
+    tight ? `Models switch every message. ${chain.length > 3 ? "Ollama keeps at most 3 loaded at once" : `These need ${need.toFixed(1)} GB`}, so expect reloads and long waits.`
+          : `Turns per run: ${chain.length} × (rounds + 1)${ending === "moderator" ? "" : ` + ${chain.length} votes`}.`;
+  $("#roundHint").classList.toggle("tight", !!tight);
+}
+document.querySelectorAll(".strat.ending button").forEach(b => b.onclick = () => { ending = b.dataset.ending; renderRoundPanel(); });
+$("#moderator").onchange = () => renderRoundPanel();
+
 // the cards a vision run gets: readers, then the combiner, or with fields the vote (and the final agent if asked)
 function visionCards(readers, fmt, combiner, asked) {
   if (fmt !== "fields") return { names: [...readers, combiner], roles: null };
@@ -560,6 +640,8 @@ let chains = {}, defaultChain = [];
 function chainFor(m) {
   const ok = n => installed.some(x => x.name === n);
   if (chains[m]?.some(ok)) return chains[m].filter(ok);
+  if (m === "roundtable" && installed.length > 2)  // three small models that fit in memory together
+    return [...installed].sort((a, b) => a.gb - b.gb).slice(0, 3).map(x => x.name);
   if (m === "vision") {  // start Vision with the models that can see images, smallest first
     const seeing = installed.filter(x => x.vision).sort((a, b) => a.gb - b.gb).map(x => x.name);
     if (seeing.length) return seeing.slice(0, 2);
@@ -581,6 +663,7 @@ function setMode(m) {
   $("#cipherPanel").hidden = m !== "cipher";
   $("#translatePanel").hidden = m !== "translate";
   $("#visionPanel").hidden = m !== "vision";
+  $("#roundPanel").hidden = m !== "roundtable";
   $("#imgzone").hidden = m !== "vision";
   $("#extractBox").hidden = m !== "vision";
   renderChain();
@@ -670,6 +753,7 @@ function renderChain() {
     (tight ? ". Not all of them fit in memory at once, so they'll take turns loading, which is slower." : "");
   $("#mem").classList.toggle("tight", !!tight);
   renderCombiner();
+  renderRoundPanel();
 }
 function renderCombiner(pick) {
   const sel = $("#combiner"), keep = pick || sel.value || (installed.some(m => m.name === "granite4.2:8b") ? "granite4.2:8b" : installed[0]?.name);
@@ -732,6 +816,7 @@ function drag(e, row, from) {
 // ---- the stage: You at the top, one card per model, a wire above each card ----
 let nodes = [], wires = [], you, planted = null;
 function renderStage(task, rule, runChain, runMode, sabLayer, langs = [], imgUrls = [], roles = null) {
+  room = null;
   const stage = $("#stage"); stage.replaceChildren(); nodes = []; wires = []; planted = null;
   const bar = el("div", "stagebar");
   const all = (fold, text) => { const b = el("button", "ghost", text); b.type = "button";
@@ -810,6 +895,62 @@ function addMsg(n, cls, label, meta, text, opts) {  // for cards that collect se
 }
 const photoName = p => p === null ? "all photos" : p === undefined ? "the photo" : `photo ${p + 1}`;
 
+// ---- roundtable: the stage is a group chat ----
+const WHO = ["--accent", "--up", "--violet", "--teal", "--warn", "--pink", "--bad"];
+let room = null;
+function renderRoom(task, rule, models) {
+  const stage = $("#stage"); stage.replaceChildren(); nodes = []; wires = [];
+  you = el("div", "node you");
+  const h = el("div", "head"); h.append(el("span", "model", "You"), el("span", "status", ""));
+  you.append(h);
+  if (rule) { const r = el("div", "msg down show"); r.append(lbl("Rule for every model"), el("div", "txt", rule)); you.append(r); }
+  const m = el("div", "msg down show"); m.append(lbl("Question for the table"), el("div", "txt", task)); you.append(m);
+  you.enc = el("div", "msg down"); you.answer = el("div", "msg up"); you.append(you.answer);
+  room = { box: el("div", "room"), colors: {}, last: null, typing: el("div", "typing") };
+  models.forEach((name, i) => room.colors[name] = `var(${WHO[i % WHO.length]})`);
+  room.typing.hidden = true;
+  stage.append(you, room.box, room.typing);
+}
+function divider(key, text) {
+  if (room.last === key) return;
+  room.last = key; room.box.append(el("div", "divider", text));
+}
+function bubble(who, meta, text, extra = []) {
+  const b = el("div", "bubble"); b.style.setProperty("--who", room.colors[who] || "var(--muted)");
+  const top = el("div", "who"); top.append(el("b", null, who), ...extra, el("small", null, meta));
+  b.append(top, el("div", "txt", text)); room.box.append(b);
+  return b;
+}
+function roomHandle(e) {
+  const roundName = r => r === 0 ? "Round 0 · everyone answers alone" : `Round ${r} · discussion`;
+  if (e.type === "call") {
+    if (e.dir === "say") divider("r" + e.round, roundName(e.round));
+    if (e.dir === "ballot") divider("vote", "The vote");
+    if (e.dir === "moderate") divider("mod", "Moderator");
+    room.typing.hidden = false;
+    room.typing.textContent = `${e.model} is ${e.dir === "ballot" ? "voting" : e.dir === "moderate" ? "summing up" : "thinking"}…`;
+    room.typing.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    return;
+  }
+  room.typing.hidden = true;
+  const meta = `${e.secs}s · ${e.tok_s} tok/s` + (e.load >= 0.5 ? ` · ${e.load}s loading` : "") + (e.cut ? " · cut off" : "");
+  if (e.dir === "say") {
+    divider("r" + e.round, roundName(e.round));
+    const b = bubble(e.model, meta, e.sent, e.changed ? [el("span", "tag sab", "changed their mind")] : []);
+    b.append(el("div", "ans", "My answer: " + e.answer));
+  } else if (e.dir === "ballot") {
+    divider("vote", "The vote");
+    const row = el("div", "ballot"), who = el("b", null, e.model);
+    who.style.color = room.colors[e.model];
+    row.append(who, el("div", null, e.spoiled ? "spoiled ballot (couldn't read the vote)" : `voted for ${e.for}`));
+    if (e.reason) row.append(el("span", null, e.reason));
+    room.box.append(row);
+  } else if (e.dir === "moderate") {
+    divider("mod", "Moderator");
+    bubble(e.model, meta, e.sent);
+  }
+}
+
 function lbl(text, meta) {
   const l = el("div", "lbl"); l.append(el("span", null, text));
   if (meta) l.append(el("span", null, meta));
@@ -832,6 +973,7 @@ function busy(i, text) {
 const mark = ok => ok === true ? "✓" : ok === false ? "✗" : "?";
 
 function handle(e) {
+  if (room && (e.type === "call" || e.type === "step")) return roomHandle(e);
   const n = nodes[e.layer];
   if (e.type === "start") {
     fill(you.enc, `Encoded by the tool · ${CNAME[e.cipher]}`, null, e.sent, { code: true });
@@ -918,6 +1060,24 @@ function finish(e) {
   if (e.mode === "blind") {
     parts.push(lbl("Done"), el("div", "stats",
       `${e.calls} models answered in ${e.secs}s · at most ${e.peak.length} in memory at once · compare their answers below`));
+  } else if (e.mode === "roundtable") {
+    if (room) room.typing.hidden = true;
+    const w = e.winners || [];
+    if (e.tally) {
+      parts.push(lbl(w.length === 1 ? "Winner" : w.length ? "Tie" : "No winner"));
+      if (w.length === 1) parts.push(el("div", "final", `${w[0]}: ${e.answers[w[0]]}`));
+      else if (w.length) parts.push(el("div", "txt", w.map(m => `${m}: ${e.answers[m]}`).join("\n")));
+      const t = el("div", "tally"), most = Math.max(1, ...Object.values(e.tally));
+      Object.entries(e.tally).forEach(([m, c]) => {
+        const bar = el("div", "bar"), fill = el("i"); fill.style.width = `${(c / most) * 100}%`; bar.append(fill);
+        t.append(el("span", null, m), bar, el("span", null, `${c} vote${c === 1 ? "" : "s"}`));
+      });
+      parts.push(t);
+    }
+    if (e.summary) parts.push(lbl("Moderator's final answer"), el("div", "final", e.answer));
+    parts.push(el("div", "stats", `${e.minds_changed} change${e.minds_changed === 1 ? "" : "s"} of mind · ${e.rounds} discussion round${e.rounds === 1 ? "" : "s"}` +
+                                    (e.allow_self ? " · self-votes allowed" : "")));
+    parts.push(el("div", "stats", `${e.secs}s · ${e.calls} model calls`));
   } else if (e.mode === "vision" && e.format === "fields") {
     const asked = e.answer !== e.combined;
     if (asked) parts.push(lbl("Final agent's answer"), el("div", "txt", e.answer));
@@ -993,13 +1153,15 @@ async function run(task) {
   if (m === "vision") {
     const cards = visionCards(readers, $("#format").value, $("#combiner").value, !!task);
     renderStage(task, rule, cards.names, m, null, [], images.map(i => i.url), cards.roles);
-  }
+  } else if (m === "roundtable") renderRoom(task, rule, chain);
   else renderStage(task, rule, chain, m, sab, routeNow());
   const params = { task, chain: chain.join(","), mode: m, rule, cipher: $("#cipher").value, saboteur: sab ?? "",
                    langs: route.slice(0, chain.length - 1).join(","),
                    ...(m === "vision" ? { images: images.map(i => i.b64), format: $("#format").value,
                                           combiner: $("#combiner").value, strategy,
-                                          fields: fieldSpec.filter(f => f.name.trim()) } : {}) };
+                                          fields: fieldSpec.filter(f => f.name.trim()) } : {}),
+                   ...(m === "roundtable" ? { rounds: $("#rounds").value, ending, moderator: $("#moderator").value,
+                                              allow_self: $("#allowSelf").checked } : {}) };
   try {
     const res = await fetch("/run", { method: "POST", headers: { "Content-Type": "application/json" },
                                       body: JSON.stringify(params) });
@@ -1034,6 +1196,7 @@ $("#form").onsubmit = ev => {
       return warn("None of the models in the chain can see images. Add gemma3:4b or a gemma4 model.");
     return run(task);
   }
+  if (current === "roundtable" && chain.length < 2) return warn("A roundtable needs at least two models.");
   if (task) run(task);
 };
 
@@ -1044,6 +1207,10 @@ function summary(r) {
   if (r.mode === "vision") {
     const count = (r.images || [r.image]).length;
     return `${count} photo${count > 1 ? "s" : ""}${count > 1 && r.strategy ? " · " + STRAT[r.strategy].name : ""} · ${FMT[r.format] || r.format} · ${(r.readers || []).length} readers → ${String(r.answer).split("\n")[0]}`;
+  }
+  if (r.mode === "roundtable") {
+    const w = r.winners || [];
+    return `${r.rounds} round${r.rounds === 1 ? "" : "s"} · ` + (w.length === 1 ? `winner ${w[0]}` : w.length ? "tie" : r.ending) + ` → ${r.answer}`;
   }
   if (r.mode === "translate") return `${(r.langs || []).join(" → ")} · ${Math.round(r.match * 100)}% match → ${r.answer}`;
   const s = r.sabotage;
@@ -1078,6 +1245,10 @@ async function openRun(id) {
   if (r.cipher) $("#cipher").value = r.cipher;
   if (r.langs) route = r.langs.slice(0, -1);
   if (r.format) setFormat(r.format);
+  if (r.mode === "roundtable") {
+    $("#rounds").value = String(r.rounds); ending = r.ending || "vote"; $("#allowSelf").checked = !!r.allow_self;
+    if (r.moderator) $("#moderator").value = r.moderator;
+  }
   if (r.fields) { fieldSpec = r.fields.map(f => ({ ...f })); saveFields(); renderFields(); }
   if (r.combiner) renderCombiner(r.combiner);
   const imgUrls = (r.images || (r.image ? [r.image] : [])).map(n => "/images/" + n);
@@ -1093,7 +1264,7 @@ async function openRun(id) {
   if (r.mode === "vision") {
     const cards = visionCards(r.readers, r.format, r.combiner, r.answer !== r.combined);
     renderStage(r.task, r.rule, cards.names, r.mode, null, [], imgUrls, cards.roles);
-  }
+  } else if (r.mode === "roundtable") { renderRoom(r.task, r.rule, r.chain); renderRoundPanel(); }
   else renderStage(r.task, r.rule, r.chain, r.mode, r.saboteur ?? null, r.langs);
   if (r.mode === "cipher") handle({ type: "start", cipher: r.ciphers[0], sent: r.encoded });
   const honest = r.sabotage?.outcome === "no_lie";  // older runs didn't record "lied" per step

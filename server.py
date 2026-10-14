@@ -100,7 +100,9 @@ class Handler(BaseHTTPRequestHandler):
                           cipher_name=cipher, route=split(q.get("langs")),
                           images=q.get("images") or [q.get("image")], fmt=q.get("format", "text"),
                           combiner=q.get("combiner") or "granite4.2:8b", strategy=q.get("strategy", "batch"),
-                          fields=q.get("fields") or [])
+                          fields=q.get("fields") or [], rounds=int(q.get("rounds", 2) or 0),
+                          ending=q.get("ending", "vote"), moderator=q.get("moderator") or "granite4.2:8b",
+                          allow_self=bool(q.get("allow_self")))
             send({"type": "done", **{k: v for k, v in r.items() if k != "trace"}})
         except (BrokenPipeError, ConnectionResetError):
             pass  # the page was closed mid-run
