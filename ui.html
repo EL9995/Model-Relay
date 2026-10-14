@@ -444,7 +444,7 @@ const el = (tag, cls, text) => {
   if (text != null) e.textContent = text;
   return e;
 };
-let installed = [], chain = [], ramGb = 0, running = false, openId = null;
+let installed = [], unusable = [], chain = [], ramGb = 0, running = false, openId = null;
 let current = "relay", saboteur = null;
 let languages = [], defaultRoute = [], route = [];  // route: one language per position, not per model  // saboteur is a model name, so it follows the model when you reorder
 const gb = name => (installed.find(m => m.name === name) || {}).gb || 0;
@@ -755,6 +755,7 @@ function renderChain() {
   $("#mem").textContent = `${chain.length} models · ${total.toFixed(1)} GB` + (ramGb ? ` · your Mac has ${ramGb} GB` : "") +
     (tight ? ". Not all of them fit in memory at once, so they'll take turns loading, which is slower." : "");
   $("#mem").classList.toggle("tight", !!tight);
+  if (unusable.length) $("#mem").append(el("span", "nf", ` Not shown: ${unusable.join(", ")} (can't write text, so no mode can use ${unusable.length > 1 ? "them" : "it"}).`));
   renderCombiner();
   renderRoundPanel();
 }
@@ -1285,7 +1286,9 @@ async function openRun(id) {
 setMode("relay");
 fetch("/models").then(r => r.json()).then(d => {
   if (d.error) return warn(d.error);
-  installed = d.models; ramGb = d.ram_gb || 0;
+  // every mode needs models that write text; others (e.g. classifiers) are left out, with a note
+  installed = d.models.filter(m => m.text !== false); ramGb = d.ram_gb || 0;
+  unusable = d.models.filter(m => m.text === false).map(m => m.name);
   languages = d.languages || []; defaultRoute = d.route || [];
   defaultChain = d.default.filter(n => installed.some(m => m.name === n));
   try { chains = JSON.parse(localStorage.getItem(CHAINS_KEY)) || {}; } catch { chains = {}; }

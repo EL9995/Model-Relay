@@ -41,7 +41,8 @@ class Handler(BaseHTTPRequestHandler):
                 with ThreadPoolExecutor(8) as pool:
                     found = list(pool.map(caps, [m["name"] for m in tags]))
                 models = [{"name": m["name"], "gb": round(m["size"] / 1e9, 1), "vision": "vision" in c,
-                           "tools": "tools" in c} for m, c in zip(tags, found)]
+                           "tools": "tools" in c, "text": "completion" in c or not c}  # unknown: assume it writes text
+                          for m, c in zip(tags, found)]
                 body = {"models": models, "default": relay.DEFAULT_CHAIN.split(","), "ram_gb": RAM_GB,
                         "languages": relay.LANGUAGES[:-1], "route": relay.DEFAULT_ROUTE}
             except OSError as e:
