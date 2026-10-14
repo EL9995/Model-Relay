@@ -1097,7 +1097,8 @@ function finish(e) {
     const ag = el("div", "agree");
     e.agreement.forEach(a => ag.append(el("span", null, a.model), el("span", null, `${Math.round(a.match * 100)}%`)));
     parts.push(el("div", "stats", "Share of fields where each model matched the most common answer:"), ag);
-    if (e.skipped.length) parts.push(el("div", "stats", `Skipped as readers (can't see images): ${e.skipped.join(", ")}`));
+    if (e.skipped.length) parts.push(el("div", "stats", "Skipped as readers: " +
+      e.skipped.map(m => `${m} (${(e.skipped_why || {})[m] || "can't see images"})`).join(", ")));
     parts.push(el("div", "verdict", `first result at ${e.first_result}s · all done at ${e.secs}s · ${e.load_secs}s loading models`));
   } else if (e.mode === "vision") {
     const asked = e.answer !== e.combined;
@@ -1106,7 +1107,8 @@ function finish(e) {
     const ag = el("div", "agree");
     e.agreement.forEach(a => ag.append(el("span", null, a.model), el("span", null, `${Math.round(a.match * 100)}%`)));
     parts.push(el("div", "stats", "How closely each reading matches the combined text:"), ag);
-    if (e.skipped.length) parts.push(el("div", "stats", `Skipped as readers (can't see images): ${e.skipped.join(", ")}`));
+    if (e.skipped.length) parts.push(el("div", "stats", "Skipped as readers: " +
+      e.skipped.map(m => `${m} (${(e.skipped_why || {})[m] || "can't see images"})`).join(", ")));
     const count = (e.images || [e.image]).length;
     if (e.first_result != null)
       parts.push(el("div", "verdict", `${count > 1 ? STRAT[e.strategy].name + " · " : ""}first result at ${e.first_result}s · all done at ${e.secs}s · ${e.load_secs}s loading models`));

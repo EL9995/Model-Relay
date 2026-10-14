@@ -87,8 +87,10 @@ def score(case, answer, record):
 
 # ---- configs and runs ----
 
-def configs(chain, saboteur):
+def configs(chain, saboteur, solo=False):
     out = [{"name": f"{m} alone", "chain": [m]} for m in chain]
+    if solo:
+        return out
     out.append({"name": "relay", "chain": chain})
     if saboteur:
         out += [{"name": f"relay, saboteur L{i + 1}", "chain": chain, "saboteur": i}
@@ -116,6 +118,7 @@ def main():
     p.add_argument("--chain", default=relay.DEFAULT_CHAIN, help="models in order, top first")
     p.add_argument("--saboteur", action="store_true", help="also run the chain with a saboteur at each layer")
     p.add_argument("--only", help="comma-separated case ids to run")
+    p.add_argument("--solo", action="store_true", help="only test each model on its own, no relay")
     p.add_argument("--show", metavar="FILE", help="print the scorecard of a saved harness run and exit")
     p.add_argument("--rescore", metavar="FILE",
                    help="re-check a saved run's answers with the current checks, without rerunning models")
@@ -135,7 +138,7 @@ def main():
         keep = set(a.only.split(","))
         cases = [c for c in cases if c["id"] in keep]
     chain = [m.strip() for m in a.chain.split(",") if m.strip()]
-    cfgs = configs(chain, a.saboteur)
+    cfgs = configs(chain, a.saboteur, a.solo)
 
     total, n, results = len(cases) * len(cfgs), 0, []
     start = time.time()

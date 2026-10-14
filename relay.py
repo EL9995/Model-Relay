@@ -39,6 +39,9 @@ BLIND_TOKENS = 512  # blind answers are the output itself, so give them more roo
 VISION_TOKENS = 1024  # a page of extracted text can be long
 VISION_CTX = 4096     # an image takes a few hundred tokens of context on its own
 COMBINE_CTX = 8192    # the final agent reads every extraction at once
+MAX_CTX = 32768       # how far a request's context may grow when a big image needs it
+THINKS_ALWAYS = ("deepseek-r1",)  # models that reason out loud even when asked not to: more room to answer
+OCR_ONLY = ("deepseek-ocr",)      # models that only follow their trained OCR command
 
 DOWN_PROMPT = (
     "You are layer {n} of {total} in a relay chain of AI models. Your boss gave you a task. "
@@ -104,19 +107,35 @@ def ask(model, prompt, kind, rule="", max_tokens=MAX_TOKENS, images=None, num_ct
         body["system"] = rule
     if images:
         body["images"] = images
+    if model.startswith(THINKS_ALWAYS):
+        body["options"]["num_predict"] = min(max_tokens * 4, 2048)
     if kind != "bottom":
         body["format"] = schema or SCHEMAS[kind]
     start = time.time()
-    try:
-        r = post("/api/generate", body)
-    except urllib.error.HTTPError as e:
-        if e.code != 400:
-            raise
-        body.pop("think")  # models without a thinking mode reject the flag
-        r = post("/api/generate", body)
+    for _ in range(3):
+        try:
+            r = post("/api/generate", body)
+            break
+        except urllib.error.HTTPError as e:
+            if e.code != 400:
+                raise
+            msg = e.read().decode(errors="replace")
+            need = re.search(r"request \((\d+) tokens\) exceeds the available context", msg)
+            if need and body["options"]["num_ctx"] < MAX_CTX:  # e.g. an image split into many tiles
+                want = int(need.group(1)) + body["options"]["num_predict"] + 256
+                body["options"]["num_ctx"] = min(MAX_CTX, 1 << (want - 1).bit_length())
+            elif "think" in body:
+                body.pop("think")  # models without a thinking mode reject the flag
+            else:
+                raise urllib.error.HTTPError(e.url, e.code, msg, e.headers, None) from None
+    else:
+        raise RuntimeError(f"{model} kept rejecting the request")
     if not r.get("response", "").strip() and not r.get("eval_count"):
         r = post("/api/generate", body)  # an empty reply is a hiccup (e.g. memory pressure); try once more
     secs = time.time() - start
+    if "<think>" in r["response"]:  # reasoning written into the reply; keep only the answer
+        answer = re.sub(r"(?s)<think>.*?</think>", "", r["response"])
+        r["response"] = "" if "<think>" in answer else answer  # still open: cut off mid-thought
     try:
         out = json.loads(r["response"]) if kind != "bottom" else {"answer": r["response"].strip()}
     except ValueError:
@@ -557,9 +576,15 @@ def vision(instruction, chain, rule="", on_event=lambda e: None, images=(), fmt=
     if strategy not in STRATEGIES:
         raise ValueError(f"unknown strategy {strategy!r}")
     snapshots.clear()
-    readers = [m for m in chain if "vision" in capabilities(m)]
+    seeing = [m for m in chain if "vision" in capabilities(m)]
+    skipped_why = {m: "can't see images" for m in chain if m not in seeing}
+    readers = seeing
+    if fmt in ("json", "fields"):  # OCR-only models can't follow these instructions
+        readers = [m for m in seeing if not m.startswith(OCR_ONLY)]
+        skipped_why.update({m: "only reads plain text" for m in seeing if m not in readers})
     if not readers:
-        raise ValueError("none of the models in the chain can see images; add gemma3:4b or a gemma4 model")
+        raise ValueError("none of the models in the chain can read the photo this way; "
+                         "add gemma3:4b, a gemma4 model or minicpm")
     n, k = len(images), len(readers)
     fields = clean_fields(fields)
     if fmt == "fields" and not fields:
@@ -588,6 +613,8 @@ def vision(instruction, chain, rule="", on_event=lambda e: None, images=(), fmt=
             imgs = [images[photo]]
         else:
             prompt, imgs = EXTRACT_PROMPTS[fmt], [images[photo]]
+        if model.startswith(OCR_ONLY):
+            prompt = "Free OCR."  # its trained command; it ignores longer instructions
         out, secs, tps = ask(model, prompt, kind, rule, VISION_TOKENS * (n if photo is None else 1), imgs,
                              VISION_CTX + (n - 1) * 1024 * (photo is None), schema)
         if fmt == "fields":
@@ -661,7 +688,8 @@ def vision(instruction, chain, rule="", on_event=lambda e: None, images=(), fmt=
                      for i, m in enumerate(readers)]
     return answer, trace, {
         "format": fmt, "combiner": combiner, "readers": readers, "combined": joined, "strategy": strategy,
-        "skipped": [m for m in chain if m not in readers], "images": names, "image": names[0],
+        "skipped": [m for m in chain if m not in readers], "skipped_why": skipped_why,
+        "images": names, "image": names[0],
         "first_result": min(t["at"] for t in trace if t["dir"] in ("combine", "vote")),
         "load_secs": round(sum(t.get("load", 0) for t in trace), 1), "agreement": agreement,
         **({"fields": fields, "grids": [grids[p] for p in photos]} if fmt == "fields" else {})}
