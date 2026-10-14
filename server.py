@@ -14,6 +14,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import relay
+import report
 
 PORT = 8765
 PAGE = Path(__file__).with_name("ui.html")
@@ -48,6 +49,16 @@ class Handler(BaseHTTPRequestHandler):
             self.reply(200, "application/json", json.dumps(body).encode())
         elif url.path == "/runs":
             self.reply(200, "application/json", json.dumps(relay.list_runs()).encode())
+        elif url.path.startswith("/runs/") and url.path.endswith((".md", ".html")):
+            rid, ext = url.path[len("/runs/"):].rsplit(".", 1)
+            r = relay.load_run(rid)
+            if not r:
+                self.reply(404, "text/plain", b"no such run")
+            elif ext == "md":  # a download
+                self.reply(200, "text/markdown; charset=utf-8", report.to_markdown(r).encode(),
+                           {"Content-Disposition": f'attachment; filename="{rid}.md"'})
+            else:  # opens as a page; Print > Save as PDF works from there
+                self.reply(200, "text/html; charset=utf-8", report.to_html(r).encode())
         elif url.path.startswith("/runs/"):
             r = relay.load_run(url.path[len("/runs/"):])
             if r:
@@ -109,9 +120,11 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:
             send({"type": "error", "message": str(e)})
 
-    def reply(self, code, ctype, body):
+    def reply(self, code, ctype, body, headers=None):
         self.send_response(code)
         self.send_header("Content-Type", ctype)
+        for k, v in (headers or {}).items():
+            self.send_header(k, v)
         self.end_headers()
         self.wfile.write(body)
 

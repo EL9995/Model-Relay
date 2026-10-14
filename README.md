@@ -75,6 +75,11 @@ Every run, from the page or the command line, is saved as one JSON file in `runs
 the prompt, rule, mode, chain, every message each model sent, timings, and the final answer.
 The page's **Saved runs** list opens any of them again. Add `--no-save` to skip saving.
 
+Every finished run also has **Open report** (a readable, standalone page with photos embedded; use
+Print → Save as PDF for a PDF) and **Download Markdown** (the same report as plain text, for GitHub
+or notes). Each mode gets its own layout. From the command line:
+`python3 report.py runs/<file>.json` writes both into `runs/reports/`.
+
 ## Harness
 
 `harness.py` scores configurations on a suite of questions with known answers
